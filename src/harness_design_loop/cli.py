@@ -1,29 +1,23 @@
-"""harness-design-loop 命令行入口。"""
+"""harness-design-loop 命令行入口。
+
+这层只管:解析参数、把结果打印给用户、把活儿交给 workflow。
+run / score / compare 的编排逻辑在 workflow.py。
+"""
 from __future__ import annotations
 
 import argparse
-import json
-import os
 import sys
-import time
 from pathlib import Path
 
-from harness_design_loop import report, templates
-from harness_design_loop.comparator import compare_scores
-from harness_design_loop.connect import CONNECT_TYPES, parse_connect
-from harness_design_loop.grader import llm_grader, score_run, stub_grader
+from harness_design_loop import templates, workflow
+from harness_design_loop.connect import parse_connect
 from harness_design_loop.program import (
     DECLARATION_STATUS,
     KNOWN_DECLARATIONS,
     parse_program,
 )
 from harness_design_loop.rubric import parse_rubric
-from harness_design_loop.runner import run_experiment
-from harness_design_loop.simulator import (
-    make_llm_simulator,
-    parse_simulator,
-    stub_simulator,
-)
+from harness_design_loop.simulator import parse_simulator
 from harness_design_loop.testset import load_testset
 from harness_design_loop.version import load_versions
 
@@ -290,58 +284,15 @@ def cmd_run(args: argparse.Namespace) -> int:
         print(f"找不到实验:{args.experiment}", file=sys.stderr)
         return 1
     try:
-        versions = load_versions(exp_dir)
-        cases = load_testset(exp_dir)
-    except (FileNotFoundError, NotImplementedError, ValueError) as e:
+        result = workflow.run(exp_dir, args.llm)
+    except workflow.WorkflowError as e:
         print(str(e), file=sys.stderr)
         return 1
-    if not versions or not cases:
-        print("versions/ 或 测试集/ 是空的,没法跑", file=sys.stderr)
-        return 1
-
-    # 全局 connect 是各版本的回退;版本自带接入的可以不靠它
-    connect_path = Path.cwd() / "connect.md"
-    connect = parse_connect(connect_path) if connect_path.exists() else None
-    global_ok = connect is not None and connect.conn_type in CONNECT_TYPES
-    no_conn = [v.version_id for v in versions if v.connect is None and not global_ok]
-    if no_conn:
-        print(f"这些版本没接入配置、全局 connect.md 也用不了:{'、'.join(no_conn)}",
-              file=sys.stderr)
-        print("  给版本加「类型」「配置」段,或在 connect.md 配好全局接入", file=sys.stderr)
-        return 1
-
-    if args.llm:
-        sim_path = exp_dir / "模拟器.md"
-        if not sim_path.exists():
-            print(f"--llm 要 模拟器.md,实验里没有:{exp_dir}", file=sys.stderr)
-            return 1
-        try:
-            simulator = make_llm_simulator(parse_simulator(sim_path))
-        except RuntimeError as e:
-            print(str(e), file=sys.stderr)
-            return 1
-        sim_name = "LLM 模拟器"
-    else:
-        simulator = stub_simulator
-        sim_name = "本地桩模拟器"
-
-    print(f"实验:{exp_dir.name}  {len(versions)} 版本 × {len(cases)} case,多轮跑({sim_name})")
-    runs = run_experiment(connect, versions, cases, simulator)
-
-    results_dir = exp_dir / "results"
-    results_dir.mkdir(exist_ok=True)
-    out_path = results_dir / f"run-{time.strftime('%Y%m%d-%H%M%S')}.json"
-    out_path.write_text(
-        json.dumps([r.__dict__ for r in runs], ensure_ascii=False, indent=2),
-        encoding="utf-8")
-
-    ok = sum(1 for r in runs if not r.error)
-    turns = sum(len(r.transcript) for r in runs if not r.error)
-    print(f"  跑完 {len(runs)} 条:成功 {ok},失败 {len(runs) - ok},共 {turns} 轮对话")
-    for r in runs:
-        if r.error:
-            print(f"  ! {r.version_id}/{r.case_id}:{r.error}")
-    print(f"  对话存到:{out_path}")
+    print(f"  跑完 {result.total} 条:成功 {result.ok},"
+          f"失败 {result.failed},共 {result.turns} 轮对话")
+    for version_id, case_id, error in result.errors:
+        print(f"  ! {version_id}/{case_id}:{error}")
+    print(f"  对话存到:{result.out_path}")
     return 0
 
 
@@ -350,62 +301,17 @@ def cmd_score(args: argparse.Namespace) -> int:
     if exp_dir is None:
         print(f"找不到实验:{args.experiment}", file=sys.stderr)
         return 1
-    rubric_path = exp_dir / "rubric.md"
-    if not rubric_path.exists():
-        print(f"实验里没有 rubric.md:{exp_dir}", file=sys.stderr)
-        return 1
-    results_dir = exp_dir / "results"
-    run_files = sorted(results_dir.glob("run-*.json")) if results_dir.exists() else []
-    if not run_files:
-        print("还没有 run 结果,先 hdl run", file=sys.stderr)
-        return 1
-    run_file = run_files[-1]
-
-    rubric = parse_rubric(rubric_path)
-    if not rubric.dimensions:
-        print("rubric 没有维度,先填 rubric.md", file=sys.stderr)
-        return 1
-    runs = json.loads(run_file.read_text(encoding="utf-8"))
-
-    if args.llm:
-        missing = [v for v in ("HDL_JUDGE_BASE_URL", "HDL_JUDGE_MODEL", "HDL_JUDGE_API_KEY")
-                   if not os.environ.get(v)]
-        if missing:
-            print(f"--llm 要先设环境变量:{'、'.join(missing)}", file=sys.stderr)
-            return 1
-        grader = llm_grader
-        grader_name = f"LLM Judge({os.environ.get('HDL_JUDGE_MODEL')})"
-    else:
-        grader = stub_grader
-        grader_name = "本地桩(未接真模型)"
-
     try:
-        scores = score_run(rubric, runs, grader)
-    except Exception as e:  # noqa: BLE001
-        print(f"打分出错:{e}", file=sys.stderr)
+        result = workflow.score(exp_dir, args.llm)
+    except workflow.WorkflowError as e:
+        print(str(e), file=sys.stderr)
         return 1
-    if not scores:
-        print("没有可打分的对话(run 结果全是错误?)", file=sys.stderr)
-        return 1
-
-    out_path = results_dir / f"score-{time.strftime('%Y%m%d-%H%M%S')}.json"
-    out_path.write_text(json.dumps({
-        "run": run_file.name,
-        "rubric": "rubric.md",
-        "grader": grader_name,
-        "scores": [s.__dict__ for s in scores],
-    }, ensure_ascii=False, indent=2), encoding="utf-8")
-
-    print(f"实验:{exp_dir.name}  打分:{run_file.name}  评分器:{grader_name}")
+    print(f"实验:{exp_dir.name}  打分:{result.run_file}  评分器:{result.grader_name}")
     print()
-    by_version: dict[str, list[float]] = {}
-    for s in scores:
-        by_version.setdefault(s.version_id, []).append(s.total)
-    for vid, totals in by_version.items():
-        avg = sum(totals) / len(totals)
-        print(f"  {vid}  平均总分 {avg:.2f}  ({len(totals)} case)")
+    for version_id, avg, case_count in result.by_version:
+        print(f"  {version_id}  平均总分 {avg:.2f}  ({case_count} case)")
     print()
-    print(f"  分数存到:{out_path}")
+    print(f"  分数存到:{result.out_path}")
     return 0
 
 
@@ -414,33 +320,13 @@ def cmd_compare(args: argparse.Namespace) -> int:
     if exp_dir is None:
         print(f"找不到实验:{args.experiment}", file=sys.stderr)
         return 1
-    results_dir = exp_dir / "results"
-    score_files = sorted(results_dir.glob("score-*.json")) if results_dir.exists() else []
-    if not score_files:
-        print("还没有 score 结果,先 hdl score", file=sys.stderr)
-        return 1
-    score_file = score_files[-1]
-    data = json.loads(score_file.read_text(encoding="utf-8"))
-    scores = data.get("scores", [])
-    if not scores:
-        print("score 文件里没有分数", file=sys.stderr)
-        return 1
-
     try:
-        versions = load_versions(exp_dir)
-    except FileNotFoundError:
-        versions = []
-    baseline_id = next((v.version_id for v in versions if v.is_baseline), "")
-    program_path = exp_dir / "program.md"
-    mode = parse_program(program_path).compare_mode if program_path.exists() else "对基线"
-    comparison = compare_scores(scores, baseline_id, mode)
-    report_text = report.build_compare_report(
-        exp_dir.name, score_file.name, data.get("grader", "?"), baseline_id, comparison)
-    print(report_text)
-
-    out_path = results_dir / f"compare-{time.strftime('%Y%m%d-%H%M%S')}.md"
-    out_path.write_text(report_text + "\n", encoding="utf-8")
-    print(f"\n对比报告存到:{out_path}")
+        result = workflow.compare(exp_dir)
+    except workflow.WorkflowError as e:
+        print(str(e), file=sys.stderr)
+        return 1
+    print(result.report_text)
+    print(f"\n对比报告存到:{result.out_path}")
     return 0
 
 

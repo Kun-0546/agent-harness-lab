@@ -55,6 +55,16 @@ class TestProgram(_MdCase):
         prog = parse_program(self._md(self.PROG.replace("线性迭代", "瞎比")))
         self.assertTrue(any("对比方式" in p for p in prog.validate()))
 
+    def test_compare_mode_placeholder_falls_back(self):
+        # program.md 里 对比方式 那行还是模板占位符、没改
+        prog = parse_program(self._md(
+            "## 假设\nx\n\n## 声明\n"
+            "- 对比方式:<对基线 / 线性迭代;多版本怎么比,默认 对基线、可不写>\n"))
+        # compare 必须拿到合法值 —— 占位符不能进对比报告
+        self.assertEqual(prog.compare_mode, "对基线")
+        # 但 validate(hdl show 用)要把这行报成问题
+        self.assertTrue(any("对比方式" in p for p in prog.validate()))
+
 
 class TestRubric(_MdCase):
     def test_parse(self):

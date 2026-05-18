@@ -44,8 +44,13 @@ class Program:
 
     @property
     def compare_mode(self) -> str:
-        """对比方式;没声明则默认「对基线」。"""
-        return self.declarations.get("对比方式", "").strip() or "对基线"
+        """对比方式;空值、占位符、非法值一律落「对基线」。
+
+        非法声明由 validate() 单独报问题;这个属性只保证 compare 拿到合法值,
+        不让模板占位符这类脏值进对比报告。
+        """
+        raw = self.declarations.get("对比方式", "").strip()
+        return raw if raw in COMPARE_MODES else "对基线"
 
     def validate(self) -> list[str]:
         """返回问题清单;空清单表示没问题。"""
@@ -66,7 +71,10 @@ class Program:
             if not mdutil.is_filled(self.call_human):
                 problems.append("运行模式=自迭代,但 喊人规则 没填")
         cmp_raw = self.declarations.get("对比方式", "").strip()
-        if mdutil.is_filled(cmp_raw) and cmp_raw not in COMPARE_MODES:
+        if cmp_raw and not mdutil.is_filled(cmp_raw):
+            problems.append(
+                f"对比方式 还是模板占位符没填(可不写;要填就填 {' 或 '.join(COMPARE_MODES)})")
+        elif mdutil.is_filled(cmp_raw) and cmp_raw not in COMPARE_MODES:
             problems.append(f"对比方式「{cmp_raw}」未知(应为 {' / '.join(COMPARE_MODES)})")
         return problems
 
