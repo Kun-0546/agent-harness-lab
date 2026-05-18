@@ -1,0 +1,107 @@
+"""解析一个实验的 program.md。
+
+program 是 PM 交给 coding agent 的实验指令。格式见 docs/file-formats.md。
+"""
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass, field
+from pathlib import Path
+
+# 声明 里已知的几项,按规范顺序。
+KNOWN_DECLARATIONS = ["环境", "对话模式", "状态", "评分", "运行模式"]
+
+
+def _filled(text: str) -> bool:
+    """text 是真内容吗(非空、且不是 <占位符>)。"""
+    t = text.strip()
+    if not t:
+        return False
+    if t.startswith("<") and t.endswith(">"):
+        return False
+    return True
+
+
+@dataclass
+class Program:
+    """一个实验的 program。"""
+
+    path: Path
+    title: str = ""
+    assumption: str = ""                                        # 假设
+    declarations: dict[str, str] = field(default_factory=dict)  # 声明
+    keep_discard: str = ""                                      # 留/丢规则
+    call_human: str = ""                                        # 喊人规则
+
+    @property
+    def run_mode(self) -> str:
+        return self.declarations.get("运行模式", "").strip()
+
+    def validate(self) -> list[str]:
+        """返回问题清单;空清单表示没问题。"""
+        problems: list[str] = []
+        if not _filled(self.assumption):
+            problems.append("假设 没填")
+        for key in KNOWN_DECLARATIONS:
+            if key not in self.declarations:
+                problems.append(f"声明 缺「{key}」")
+            elif not _filled(self.declarations[key]):
+                problems.append(f"声明「{key}」没填")
+        mode = self.run_mode
+        if _filled(mode) and mode not in ("人评", "自迭代"):
+            problems.append(f"运行模式「{mode}」未知(应为 人评 或 自迭代)")
+        if mode == "自迭代":
+            if not _filled(self.keep_discard):
+                problems.append("运行模式=自迭代,但 留/丢规则 没填")
+            if not _filled(self.call_human):
+                problems.append("运行模式=自迭代,但 喊人规则 没填")
+        return problems
+
+
+def _split_sections(text: str) -> dict[str, str]:
+    """按 '## ' 标题把 markdown 切成 {标题: 正文}。"""
+    sections: dict[str, str] = {}
+    current: str | None = None
+    buf: list[str] = []
+    for line in text.splitlines():
+        if line.startswith("## "):
+            if current is not None:
+                sections[current] = "\n".join(buf).strip()
+            current = line[3:].strip()
+            buf = []
+        elif current is not None:
+            buf.append(line)
+    if current is not None:
+        sections[current] = "\n".join(buf).strip()
+    return sections
+
+
+def _parse_declarations(body: str) -> dict[str, str]:
+    """从 声明 段里解析 '- 键:值' 行(中英文冒号都认)。"""
+    decls: dict[str, str] = {}
+    for raw in body.splitlines():
+        line = raw.strip()
+        if not line.startswith("-"):
+            continue
+        item = line[1:].strip()
+        m = re.match(r"([^:：]+)[:：](.*)", item)
+        if m:
+            decls[m.group(1).strip()] = m.group(2).strip()
+    return decls
+
+
+def parse_program(path: str | Path) -> Program:
+    """读 program.md,解析成 Program。"""
+    path = Path(path)
+    text = path.read_text(encoding="utf-8")
+    prog = Program(path=path)
+    for line in text.splitlines():
+        if line.startswith("# "):
+            prog.title = line[2:].strip()
+            break
+    sections = _split_sections(text)
+    prog.assumption = sections.get("假设", "").strip()
+    prog.keep_discard = sections.get("留/丢规则", "").strip()
+    prog.call_human = sections.get("喊人规则", "").strip()
+    prog.declarations = _parse_declarations(sections.get("声明", ""))
+    return prog

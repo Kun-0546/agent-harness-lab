@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+
+# 过程文件、参考材料 —— 不进仓库
+temp/
+
+# 编辑器 / 系统
+.DS_Store
+.idea/
+.vscode/
