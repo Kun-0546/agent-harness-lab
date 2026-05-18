@@ -11,7 +11,11 @@ from pathlib import Path
 from harness_design_loop.comparator import compare_scores
 from harness_design_loop.connect import CONNECT_TYPES, parse_connect
 from harness_design_loop.grader import llm_grader, score_run, stub_grader
-from harness_design_loop.program import KNOWN_DECLARATIONS, parse_program
+from harness_design_loop.program import (
+    DECLARATION_STATUS,
+    KNOWN_DECLARATIONS,
+    parse_program,
+)
 from harness_design_loop.rubric import parse_rubric
 from harness_design_loop.runner import run_experiment
 from harness_design_loop.simulator import (
@@ -195,8 +199,11 @@ def cmd_show(args: argparse.Namespace) -> int:
     print(f"假设:{prog.assumption or '(空)'}")
     print("声明:")
     for key in KNOWN_DECLARATIONS:
-        print(f"  {key}:{prog.declarations.get(key, '(缺)')}")
-    print(f"  对比方式:{prog.compare_mode}")
+        val = prog.declarations.get(key, "(缺)")
+        status = DECLARATION_STATUS.get(key, "")
+        print(f"  {key}:{val}" + (f"  [{status}]" if status else ""))
+    cmp_status = DECLARATION_STATUS.get("对比方式", "")
+    print(f"  对比方式:{prog.compare_mode}" + (f"  [{cmp_status}]" if cmp_status else ""))
     for key, val in prog.declarations.items():
         if key not in KNOWN_DECLARATIONS and key != "对比方式":
             print(f"  {key}:{val}  (额外)")
