@@ -1,15 +1,20 @@
 """模拟器 —— 模拟模式下扮用户的那个 agent。
 
 模拟器 = experiment 里的 模拟器.md(人设 + 背景知识 + 追问策略)。
-多轮 run 里,真模拟器读这份配置 + 调模型生成追问。
-本期多轮 run 先用一个本地桩模拟器验代码;真模拟器随后接。
+多轮 run 里,模拟器看着对话生成下一句用户话。
+- stub_simulator     —— 本地桩,固定追问,验代码用。
+- make_llm_simulator —— 真模拟器,调模型按 模拟器.md 生成追问。
+                        模型 / 端点 / key 从 HDL_SIM_* 环境变量读。
 """
 from __future__ import annotations
 
+import os
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-# 桩模拟器出的固定追问 —— 不调模型,只为验多轮 run 的代码。
+from harness_design_loop import llm, mdutil
+
 _STUB_FOLLOWUPS = [
     "这个能再具体点吗?给个数。",
     "那如果情况变了,你会怎么调整?",
@@ -17,32 +22,11 @@ _STUB_FOLLOWUPS = [
 
 
 def stub_simulator(transcript: list[dict]) -> str | None:
-    """桩模拟器:看着到目前的对话,出下一句用户话;返回 None 表示对话结束。
-
-    transcript: [{turn, user, agent}, ...]。turn 0 是起始输入,之后才算追问。
-    """
+    """桩模拟器:不调模型,出几句固定追问,只为验多轮 run 的代码。"""
     asked = max(0, len(transcript) - 1)
     if asked < len(_STUB_FOLLOWUPS):
         return _STUB_FOLLOWUPS[asked]
     return None
-
-
-def _split_sections(text: str) -> dict[str, str]:
-    """按 '## ' 标题把 markdown 切成 {标题: 正文}。"""
-    sections: dict[str, str] = {}
-    current: str | None = None
-    buf: list[str] = []
-    for line in text.splitlines():
-        if line.startswith("## "):
-            if current is not None:
-                sections[current] = "\n".join(buf).strip()
-            current = line[3:].strip()
-            buf = []
-        elif current is not None:
-            buf.append(line)
-    if current is not None:
-        sections[current] = "\n".join(buf).strip()
-    return sections
 
 
 @dataclass
@@ -55,11 +39,9 @@ class Simulator:
     strategy: str = ""       # 追问策略
 
     def validate(self) -> list[str]:
-        """返回问题清单;空清单表示没问题。"""
         problems: list[str] = []
         for name, val in (("人设", self.persona), ("追问策略", self.strategy)):
-            t = val.strip()
-            if not t or (t.startswith("<") and t.endswith(">")):
+            if not mdutil.is_filled(val):
                 problems.append(f"没写{name}")
         return problems
 
@@ -67,10 +49,49 @@ class Simulator:
 def parse_simulator(path: str | Path) -> Simulator:
     """读 模拟器.md,解析成 Simulator。"""
     path = Path(path)
-    sec = _split_sections(path.read_text(encoding="utf-8"))
+    sec = mdutil.split_sections(path.read_text(encoding="utf-8"))
     return Simulator(
         path=path,
         persona=sec.get("人设", "").strip(),
         background=sec.get("背景知识", "").strip(),
         strategy=sec.get("追问策略", "").strip(),
     )
+
+
+def _transcript_text(transcript: list) -> str:
+    lines = []
+    for t in transcript:
+        lines.append(f"[第 {t.get('turn', '?')} 轮] 用户:{t.get('user', '')}")
+        lines.append(f"           agent:{t.get('agent', '')}")
+    return "\n".join(lines)
+
+
+def build_simulator_prompt(sim: Simulator, transcript: list) -> str:
+    """拼真模拟器的 prompt —— 让模型扮用户、出下一句话。"""
+    return (
+        "你在一段对话里扮演用户。按下面的人设和追问策略,生成你的下一句话。\n\n"
+        f"【人设】\n{sim.persona}\n\n"
+        f"【背景知识】\n{sim.background or '(无)'}\n\n"
+        f"【追问策略】\n{sim.strategy}\n\n"
+        f"【到目前的对话】\n{_transcript_text(transcript)}\n\n"
+        "只输出你(用户)的下一句话。如果对话已经聊透、该收尾了,只输出两个字:结束"
+    )
+
+
+def make_llm_simulator(sim: Simulator) -> Callable[[list], "str | None"]:
+    """从模拟器配置造一个真模拟器函数(调模型生成追问)。"""
+    base = os.environ.get("HDL_SIM_BASE_URL", "")
+    model = os.environ.get("HDL_SIM_MODEL", "")
+    key = os.environ.get("HDL_SIM_API_KEY", "")
+    if not (base and model and key):
+        raise RuntimeError(
+            "没配模拟器模型 —— 设环境变量 "
+            "HDL_SIM_BASE_URL / HDL_SIM_MODEL / HDL_SIM_API_KEY")
+
+    def _sim(transcript: list) -> str | None:
+        reply = llm.chat(base, model, key, build_simulator_prompt(sim, transcript)).strip()
+        if reply.startswith("结束"):
+            return None
+        return reply
+
+    return _sim

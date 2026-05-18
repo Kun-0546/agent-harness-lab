@@ -1,0 +1,165 @@
+"""接入 —— 把 connect 配置变成一个能逐轮对话的 agent 会话。
+
+design-v0.3 §3.2 的四种接入方式,本模块都实现:
+- 外部命令行:子进程 + JSON。
+- 进程内库:import 一个 callable。
+- HTTP无状态:每轮 POST 完整对话历史。
+- HTTP有状态:服务端记上下文,只 POST 新一轮 + session id。
+"""
+from __future__ import annotations
+
+import importlib
+import json
+import os
+import subprocess
+import urllib.error
+import urllib.request
+
+from harness_design_loop.connect import Connect
+
+
+class AgentSession:
+    """一次跟被测 agent 的多轮会话。各接入方式给一个子类。"""
+
+    def send(self, user_text: str) -> str:
+        """发一句用户话,收一句 agent 回答。"""
+        raise NotImplementedError
+
+    def close(self) -> None:
+        """收尾。"""
+
+
+def _child_env() -> dict[str, str]:
+    """子进程环境:强制 UTF-8,免得中文在 Windows 上炸。"""
+    env = os.environ.copy()
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUTF8"] = "1"
+    return env
+
+
+def _config_value(connect: Connect, key: str) -> str:
+    """从 connect 配置里取 '键:值' 行的值;没有就取第一行非空。"""
+    for line in connect.config.splitlines():
+        s = line.strip()
+        for sep in ("：", ":"):
+            if s.startswith(key) and sep in s:
+                return s.split(sep, 1)[1].strip()
+    for line in connect.config.splitlines():
+        if line.strip():
+            return line.strip()
+    return ""
+
+
+def _post_json(url: str, payload: dict, timeout: float = 120.0) -> dict:
+    """给 url POST 一个 JSON,返回解析后的 JSON 回答。"""
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    req = urllib.request.Request(
+        url, data=body, method="POST",
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        raise RuntimeError(f"agent HTTP {exc.code}:{exc.reason}") from exc
+
+
+def _extract_reply(data: dict) -> str:
+    """从 agent 的 HTTP 回答里抠出回复文本(认 response 或 OpenAI choices 两种)。"""
+    if "response" in data:
+        return str(data["response"])
+    if "choices" in data:
+        return str(data["choices"][0]["message"]["content"])
+    raise RuntimeError(f"agent 回答里没有 response / choices 字段:{str(data)[:120]}")
+
+
+class _CliSession(AgentSession):
+    """外部命令行:起一个子进程,逐轮交换 JSON。"""
+
+    def __init__(self, command: str):
+        self.proc = subprocess.Popen(
+            command, shell=True,
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, encoding="utf-8", env=_child_env(),
+        )
+
+    def send(self, user_text: str) -> str:
+        assert self.proc.stdin and self.proc.stdout
+        self.proc.stdin.write(json.dumps({"input": user_text}, ensure_ascii=False) + "\n")
+        self.proc.stdin.flush()
+        line = self.proc.stdout.readline()
+        if not line:
+            err = self.proc.stderr.read().strip()[:200] if self.proc.stderr else ""
+            raise RuntimeError(f"agent 没回话:{err}")
+        return str(json.loads(line).get("response", ""))
+
+    def close(self) -> None:
+        try:
+            if self.proc.stdin:
+                self.proc.stdin.close()
+            self.proc.wait(timeout=30)
+        except Exception:  # noqa: BLE001
+            self.proc.kill()
+
+
+class _LibrarySession(AgentSession):
+    """进程内库:import 一个 callable,逐轮把完整对话历史传给它。
+
+    config 写 '模块:函数';函数签名 fn(history) -> str,
+    history 是 [{"role": "user"/"assistant", "content": ...}, ...]。
+    """
+
+    def __init__(self, target: str):
+        if ":" not in target:
+            raise RuntimeError(f"进程内库配置要写 '模块:函数',收到:{target!r}")
+        mod_name, _, fn_name = target.partition(":")
+        mod = importlib.import_module(mod_name.strip())
+        self.fn = getattr(mod, fn_name.strip())
+        self.history: list[dict] = []
+
+    def send(self, user_text: str) -> str:
+        self.history.append({"role": "user", "content": user_text})
+        resp = str(self.fn(list(self.history)))
+        self.history.append({"role": "assistant", "content": resp})
+        return resp
+
+
+class _HttpStatelessSession(AgentSession):
+    """HTTP 无状态:每轮把完整对话历史 POST 过去。"""
+
+    def __init__(self, url: str):
+        self.url = url
+        self.history: list[dict] = []
+
+    def send(self, user_text: str) -> str:
+        self.history.append({"role": "user", "content": user_text})
+        reply = _extract_reply(_post_json(self.url, {"messages": list(self.history)}))
+        self.history.append({"role": "assistant", "content": reply})
+        return reply
+
+
+class _HttpStatefulSession(AgentSession):
+    """HTTP 有状态:服务端记上下文,只发新一轮 + session id。"""
+
+    def __init__(self, url: str):
+        self.url = url
+        self.session_id = ""
+
+    def send(self, user_text: str) -> str:
+        data = _post_json(self.url, {"input": user_text, "session_id": self.session_id})
+        self.session_id = str(data.get("session_id", self.session_id))
+        return _extract_reply(data)
+
+
+def open_session(connect: Connect) -> AgentSession:
+    """按 connect 的接入类型,开一个 agent 会话。"""
+    t = connect.conn_type
+    if t == "外部命令行":
+        return _CliSession(_config_value(connect, "命令"))
+    if t == "进程内库":
+        return _LibrarySession(_config_value(connect, "模块"))
+    if t == "HTTP无状态":
+        return _HttpStatelessSession(_config_value(connect, "端点"))
+    if t == "HTTP有状态":
+        return _HttpStatefulSession(_config_value(connect, "端点"))
+    raise ValueError(f"接入类型「{t}」识别不了")

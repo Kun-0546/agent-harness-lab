@@ -9,6 +9,8 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from harness_design_loop import mdutil
+
 
 @dataclass
 class Dimension:
@@ -38,8 +40,7 @@ class Rubric:
         for d in self.dimensions:
             if d.weight is None:
                 problems.append(f"维度「{d.name}」没写权重")
-            desc = d.description.strip()
-            if not desc or (desc.startswith("<") and desc.endswith(">")):
+            if not mdutil.is_filled(d.description):
                 problems.append(f"维度「{d.name}」没写说明")
         weights = [d.weight for d in self.dimensions if d.weight is not None]
         if weights:
@@ -49,29 +50,11 @@ class Rubric:
         return problems
 
 
-def _split_h2(text: str) -> list[tuple[str, str]]:
-    """按 '## ' 标题切,返回 [(标题, 正文), ...],保序。"""
-    out: list[tuple[str, str]] = []
-    current: str | None = None
-    buf: list[str] = []
-    for line in text.splitlines():
-        if line.startswith("## "):
-            if current is not None:
-                out.append((current, "\n".join(buf).strip()))
-            current = line[3:].strip()
-            buf = []
-        elif current is not None:
-            buf.append(line)
-    if current is not None:
-        out.append((current, "\n".join(buf).strip()))
-    return out
-
-
 def parse_rubric(path: str | Path) -> Rubric:
     """读 rubric.md,解析成 Rubric。"""
     path = Path(path)
     rubric = Rubric(path=path)
-    for name, body in _split_h2(path.read_text(encoding="utf-8")):
+    for name, body in mdutil.split_sections(path.read_text(encoding="utf-8")).items():
         dim = Dimension(name=name)
         desc: list[str] = []
         for line in body.splitlines():

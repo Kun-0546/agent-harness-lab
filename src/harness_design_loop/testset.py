@@ -6,21 +6,11 @@
 """
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from harness_design_loop import mdutil
 from harness_design_loop.program import parse_program
-
-
-def _filled(text: str) -> bool:
-    """text 是真内容吗(非空、且不是 <占位符>)。"""
-    t = text.strip()
-    if not t:
-        return False
-    if t.startswith("<") and t.endswith(">"):
-        return False
-    return True
 
 
 @dataclass
@@ -40,52 +30,16 @@ class TestCase:
         problems: list[str] = []
         if not self.case_id:
             problems.append("缺 id")
-        if not _filled(self.opening):
+        if not mdutil.is_filled(self.opening):
             problems.append("起始输入 没填")
         return problems
-
-
-def _parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
-    """切出开头 --- 之间的字段,返回 (字段, 正文)。没有 frontmatter 则字段为空。"""
-    if not text.startswith("---"):
-        return {}, text
-    end = text.find("\n---", 3)
-    if end == -1:
-        return {}, text
-    fields: dict[str, str] = {}
-    for line in text[3:end].splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        m = re.match(r"([^:：]+)[:：](.*)", line)
-        if m:
-            fields[m.group(1).strip()] = m.group(2).strip()
-    return fields, text[end + 4:]
-
-
-def _split_sections(text: str) -> dict[str, str]:
-    """按 '## ' 标题把 markdown 切成 {标题: 正文}。"""
-    sections: dict[str, str] = {}
-    current: str | None = None
-    buf: list[str] = []
-    for line in text.splitlines():
-        if line.startswith("## "):
-            if current is not None:
-                sections[current] = "\n".join(buf).strip()
-            current = line[3:].strip()
-            buf = []
-        elif current is not None:
-            buf.append(line)
-    if current is not None:
-        sections[current] = "\n".join(buf).strip()
-    return sections
 
 
 def parse_sim_case(path: str | Path) -> TestCase:
     """解析一个「模拟」模式的 case 文件。"""
     path = Path(path)
-    fields, body = _parse_frontmatter(path.read_text(encoding="utf-8"))
-    sections = _split_sections(body)
+    fields, body = mdutil.parse_frontmatter(path.read_text(encoding="utf-8"))
+    sections = mdutil.split_sections(body)
 
     case = TestCase(path=path)
     case.case_id = fields.get("id", "").strip() or path.stem
@@ -114,7 +68,7 @@ def load_testset(experiment_dir: str | Path) -> list[TestCase]:
     if program_path.exists():
         mode = parse_program(program_path).declarations.get("对话模式", "").strip()
 
-    if not _filled(mode) or mode == "模拟":
+    if not mdutil.is_filled(mode) or mode == "模拟":
         return [parse_sim_case(p) for p in sorted(testset_dir.glob("*.md"))]
     if mode in ("回放", "固定"):
         raise NotImplementedError(f"对话模式「{mode}」的测试集读取还没写,本期先做模拟")

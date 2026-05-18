@@ -5,21 +5,12 @@
 """
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from harness_design_loop import mdutil
+
 _YES = {"是", "yes", "true", "y", "1", "基线"}
-
-
-def _filled(text: str) -> bool:
-    """text 是真内容吗(非空、且不是 <占位符>)。"""
-    t = text.strip()
-    if not t:
-        return False
-    if t.startswith("<") and t.endswith(">"):
-        return False
-    return True
 
 
 @dataclass
@@ -37,54 +28,18 @@ class Version:
         problems: list[str] = []
         if not self.version_id:
             problems.append("缺 id")
-        if not _filled(self.what):
+        if not mdutil.is_filled(self.what):
             problems.append("没写「这是什么」")
-        if not _filled(self.setup):
+        if not mdutil.is_filled(self.setup):
             problems.append("没写接入配置")
         return problems
-
-
-def _parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
-    """切出开头 --- 之间的字段,返回 (字段, 正文)。"""
-    if not text.startswith("---"):
-        return {}, text
-    end = text.find("\n---", 3)
-    if end == -1:
-        return {}, text
-    fields: dict[str, str] = {}
-    for line in text[3:end].splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        m = re.match(r"([^:：]+)[:：](.*)", line)
-        if m:
-            fields[m.group(1).strip()] = m.group(2).strip()
-    return fields, text[end + 4:]
-
-
-def _split_sections(text: str) -> dict[str, str]:
-    """按 '## ' 标题把 markdown 切成 {标题: 正文}。"""
-    sections: dict[str, str] = {}
-    current: str | None = None
-    buf: list[str] = []
-    for line in text.splitlines():
-        if line.startswith("## "):
-            if current is not None:
-                sections[current] = "\n".join(buf).strip()
-            current = line[3:].strip()
-            buf = []
-        elif current is not None:
-            buf.append(line)
-    if current is not None:
-        sections[current] = "\n".join(buf).strip()
-    return sections
 
 
 def parse_version(path: str | Path) -> Version:
     """解析一个版本文件。"""
     path = Path(path)
-    fields, body = _parse_frontmatter(path.read_text(encoding="utf-8"))
-    sections = _split_sections(body)
+    fields, body = mdutil.parse_frontmatter(path.read_text(encoding="utf-8"))
+    sections = mdutil.split_sections(body)
     v = Version(path=path)
     v.version_id = fields.get("id", "").strip() or path.stem
     v.is_baseline = fields.get("基线", "").strip().lower() in _YES

@@ -9,12 +9,16 @@ import time
 from pathlib import Path
 
 from harness_design_loop.comparator import compare_scores
-from harness_design_loop.connect import parse_connect
+from harness_design_loop.connect import CONNECT_TYPES, parse_connect
 from harness_design_loop.grader import llm_grader, score_run, stub_grader
 from harness_design_loop.program import KNOWN_DECLARATIONS, parse_program
 from harness_design_loop.rubric import parse_rubric
 from harness_design_loop.runner import run_experiment
-from harness_design_loop.simulator import parse_simulator, stub_simulator
+from harness_design_loop.simulator import (
+    make_llm_simulator,
+    parse_simulator,
+    stub_simulator,
+)
 from harness_design_loop.testset import load_testset
 from harness_design_loop.version import load_versions
 
@@ -335,8 +339,9 @@ def cmd_run(args: argparse.Namespace) -> int:
         print("当前目录没有 connect.md(先 hdl init / connect)", file=sys.stderr)
         return 1
     connect = parse_connect(connect_path)
-    if connect.conn_type != "外部命令行":
-        print(f"接入类型「{connect.conn_type}」的 run 还没写,本期先做外部命令行", file=sys.stderr)
+    if connect.conn_type not in CONNECT_TYPES:
+        print(f"接入类型「{connect.conn_type}」识别不了(应为:{' / '.join(CONNECT_TYPES)})",
+              file=sys.stderr)
         return 1
     try:
         versions = load_versions(exp_dir)
@@ -348,8 +353,23 @@ def cmd_run(args: argparse.Namespace) -> int:
         print("versions/ 或 测试集/ 是空的,没法跑", file=sys.stderr)
         return 1
 
-    print(f"实验:{exp_dir.name}  {len(versions)} 版本 × {len(cases)} case,多轮跑")
-    runs = run_experiment(connect, versions, cases, stub_simulator)
+    if args.llm:
+        sim_path = exp_dir / "模拟器.md"
+        if not sim_path.exists():
+            print(f"--llm 要 模拟器.md,实验里没有:{exp_dir}", file=sys.stderr)
+            return 1
+        try:
+            simulator = make_llm_simulator(parse_simulator(sim_path))
+        except RuntimeError as e:
+            print(str(e), file=sys.stderr)
+            return 1
+        sim_name = "LLM 模拟器"
+    else:
+        simulator = stub_simulator
+        sim_name = "本地桩模拟器"
+
+    print(f"实验:{exp_dir.name}  {len(versions)} 版本 × {len(cases)} case,多轮跑({sim_name})")
+    runs = run_experiment(connect, versions, cases, simulator)
 
     results_dir = exp_dir / "results"
     results_dir.mkdir(exist_ok=True)
@@ -565,6 +585,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_run = sub.add_parser("run", help="跑实验:每个版本过测试集,产出对话")
     p_run.add_argument("experiment", help="实验编号或名字")
+    p_run.add_argument("--llm", action="store_true",
+                       help="用 LLM 模拟器现生追问(先设 HDL_SIM_* 环境变量);默认用本地桩")
     p_run.set_defaults(func=cmd_run)
 
     p_score = sub.add_parser("score", help="给最近一次 run 的对话按 rubric 打分")

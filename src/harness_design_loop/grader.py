@@ -13,11 +13,10 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import urllib.error
-import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from harness_design_loop import llm
 from harness_design_loop.rubric import Rubric
 
 # 评分器:给 (rubric, 版本, case, 对话 transcript) -> {维度名: 分(1-10)}。
@@ -87,29 +86,15 @@ def parse_judge_response(text: str, rubric: Rubric) -> dict[str, float]:
 
 
 def _call_llm(prompt: str) -> str:
-    """调 OpenAI 兼容的 chat completions。模型 / 端点 / key 从环境变量读。"""
-    base = os.environ.get("HDL_JUDGE_BASE_URL", "").rstrip("/")
+    """调评分模型。端点 / 模型 / key 从 HDL_JUDGE_* 环境变量读。"""
+    base = os.environ.get("HDL_JUDGE_BASE_URL", "")
     model = os.environ.get("HDL_JUDGE_MODEL", "")
     key = os.environ.get("HDL_JUDGE_API_KEY", "")
     if not (base and model and key):
         raise RuntimeError(
             "没配评分模型 —— 设环境变量 "
             "HDL_JUDGE_BASE_URL / HDL_JUDGE_MODEL / HDL_JUDGE_API_KEY")
-    body = json.dumps({
-        "model": model,
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0,
-    }).encode("utf-8")
-    req = urllib.request.Request(
-        f"{base}/chat/completions", data=body, method="POST",
-        headers={"Content-Type": "application/json", "Authorization": f"Bearer {key}"},
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=120) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        raise RuntimeError(f"评分模型调用失败 HTTP {exc.code}:{exc.reason}") from exc
-    return str(data["choices"][0]["message"]["content"])
+    return llm.chat(base, model, key, prompt)
 
 
 def llm_grader(rubric: Rubric, version_id: str, case_id: str,
