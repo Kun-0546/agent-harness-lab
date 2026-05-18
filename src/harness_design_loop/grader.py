@@ -35,11 +35,15 @@ class CaseScore:
 
 def stub_grader(rubric: Rubric, version_id: str, case_id: str,
                 transcript: list) -> dict[str, float]:
-    """本地桩评分器 —— 不调模型,给稳定的伪分,只为验代码。"""
+    """本地桩评分器 —— 不调模型,给稳定的伪分,只为验代码。
+
+    分数只由对话内容(agent 的回答)定,不掺 version_id —— 相同对话必得相同分。
+    所以版本没隔离时各版本会得一样的分(delta 全 0),桩不会造出假的版本差异。
+    """
     agent_text = "".join(t.get("agent", "") for t in transcript)
     out: dict[str, float] = {}
     for d in rubric.dimensions:
-        key = f"{version_id}|{case_id}|{d.name}|{len(transcript)}|{len(agent_text)}".encode("utf-8")
+        key = f"{d.name}|{agent_text}".encode("utf-8")
         h = int(hashlib.sha1(key).hexdigest(), 16)
         out[d.name] = round(4.0 + (h % 61) / 10.0, 1)
     return out
