@@ -33,6 +33,7 @@ PROGRAM_TEMPLATE = """# 实验 {name} · program
 - 状态:<累积 / 重置>
 - 评分:<评分器类型(规则脚本 / LLM Judge / 组合)+ 打分粒度>
 - 运行模式:<人评 / 自迭代>
+- 对比方式:<对基线 / 线性迭代;多版本怎么比,默认 对基线、可不写>
 
 ## 留/丢规则
 <一个改动满足什么算"留下",否则回滚;人评模式留空>
@@ -195,8 +196,9 @@ def cmd_show(args: argparse.Namespace) -> int:
     print("声明:")
     for key in KNOWN_DECLARATIONS:
         print(f"  {key}:{prog.declarations.get(key, '(缺)')}")
+    print(f"  对比方式:{prog.compare_mode}")
     for key, val in prog.declarations.items():
-        if key not in KNOWN_DECLARATIONS:
+        if key not in KNOWN_DECLARATIONS and key != "对比方式":
             print(f"  {key}:{val}  (额外)")
     print(f"留/丢规则:{prog.keep_discard or '(空)'}")
     print(f"喊人规则:{prog.call_human or '(空)'}")
@@ -480,14 +482,18 @@ def cmd_compare(args: argparse.Namespace) -> int:
     except FileNotFoundError:
         versions = []
     baseline_id = next((v.version_id for v in versions if v.is_baseline), "")
-    comparison = compare_scores(scores, baseline_id)
+    program_path = exp_dir / "program.md"
+    mode = parse_program(program_path).compare_mode if program_path.exists() else "对基线"
+    comparison = compare_scores(scores, baseline_id, mode)
     summaries = comparison.versions
 
     lines = [
         f"实验:{exp_dir.name}",
         f"对比:{score_file.name}  评分器:{data.get('grader', '?')}",
-        f"基线:{baseline_id or '(无 —— versions/ 里没标基线,只列总分)'}",
+        f"对比方式:{comparison.mode}",
     ]
+    if comparison.mode != "线性迭代":
+        lines.append(f"基线:{baseline_id or '(无 —— versions/ 里没标基线,只列总分)'}")
     if not comparison.coverage_even:
         lines.append("")
         lines.append("⚠ 版本间题目覆盖不一致 —— 总分、差值只在共同题上算:"
@@ -495,28 +501,28 @@ def cmd_compare(args: argparse.Namespace) -> int:
         for s in summaries:
             if s.missing:
                 lines.append(f"   {s.version_id} 缺:" + "、".join(s.missing))
+    ref_label = "起点" if comparison.mode == "线性迭代" else "基线"
     lines += ["", "版本总分:"]
     for s in summaries:
-        if s.is_baseline:
-            lines.append(f"  {s.version_id}  {s.total}  (基线)")
-        elif s.total_delta is not None:
-            sign = "+" if s.total_delta >= 0 else ""
-            lines.append(f"  {s.version_id}  {s.total}  vs基线 {sign}{s.total_delta}")
+        if s.total_delta is None:
+            lines.append(f"  {s.version_id}  {s.total}  ({ref_label})")
         else:
-            lines.append(f"  {s.version_id}  {s.total}")
+            sign = "+" if s.total_delta >= 0 else ""
+            lines.append(
+                f"  {s.version_id}  {s.total}  vs {s.compared_to} {sign}{s.total_delta}")
 
-    nonbase = [s for s in summaries if not s.is_baseline and s.dimension_delta]
-    if nonbase:
-        lines += ["", "维度 vs 基线:"]
-        for s in nonbase:
+    graded = [s for s in summaries if s.dimension_delta]
+    if graded:
+        lines += ["", "维度变化:"]
+        for s in graded:
             parts = []
             for dn, d in s.dimension_delta.items():
                 sign = "+" if d >= 0 else ""
                 mark = "↓" if d < 0 else ""
                 parts.append(f"{dn}{sign}{d}{mark}")
-            lines.append(f"  {s.version_id}  " + "  ".join(parts))
-        lines += ["", "退化维度(低于基线):"]
-        for s in nonbase:
+            lines.append(f"  {s.version_id}(vs {s.compared_to})  " + "  ".join(parts))
+        lines += ["", "退化维度:"]
+        for s in graded:
             lines.append(f"  {s.version_id}:{'、'.join(s.regressed) if s.regressed else '无'}")
 
     lines += ["", "注:差异稳不稳(噪声)要多跑几次 trial 才知道,本期没算。"]

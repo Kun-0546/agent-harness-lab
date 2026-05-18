@@ -13,6 +13,9 @@ from harness_design_loop import mdutil
 # 声明 里已知的几项,按规范顺序。
 KNOWN_DECLARATIONS = ["环境", "对话模式", "状态", "评分", "运行模式"]
 
+# 对比方式:多版本 compare 怎么算 delta。program 里可选声明,默认「对基线」。
+COMPARE_MODES = ["对基线", "线性迭代"]
+
 
 @dataclass
 class Program:
@@ -28,6 +31,11 @@ class Program:
     @property
     def run_mode(self) -> str:
         return self.declarations.get("运行模式", "").strip()
+
+    @property
+    def compare_mode(self) -> str:
+        """对比方式;没声明则默认「对基线」。"""
+        return self.declarations.get("对比方式", "").strip() or "对基线"
 
     def validate(self) -> list[str]:
         """返回问题清单;空清单表示没问题。"""
@@ -47,6 +55,9 @@ class Program:
                 problems.append("运行模式=自迭代,但 留/丢规则 没填")
             if not mdutil.is_filled(self.call_human):
                 problems.append("运行模式=自迭代,但 喊人规则 没填")
+        cmp_raw = self.declarations.get("对比方式", "").strip()
+        if mdutil.is_filled(cmp_raw) and cmp_raw not in COMPARE_MODES:
+            problems.append(f"对比方式「{cmp_raw}」未知(应为 {' / '.join(COMPARE_MODES)})")
         return problems
 
 
