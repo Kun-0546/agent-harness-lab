@@ -474,15 +474,22 @@ def cmd_compare(args: argparse.Namespace) -> int:
     except FileNotFoundError:
         versions = []
     baseline_id = next((v.version_id for v in versions if v.is_baseline), "")
-    summaries = compare_scores(scores, baseline_id)
+    comparison = compare_scores(scores, baseline_id)
+    summaries = comparison.versions
 
     lines = [
         f"实验:{exp_dir.name}",
         f"对比:{score_file.name}  评分器:{data.get('grader', '?')}",
         f"基线:{baseline_id or '(无 —— versions/ 里没标基线,只列总分)'}",
-        "",
-        "版本总分:",
     ]
+    if not comparison.coverage_even:
+        lines.append("")
+        lines.append("⚠ 版本间题目覆盖不一致 —— 总分、差值只在共同题上算:"
+                      + "、".join(comparison.basis_cases))
+        for s in summaries:
+            if s.missing:
+                lines.append(f"   {s.version_id} 缺:" + "、".join(s.missing))
+    lines += ["", "版本总分:"]
     for s in summaries:
         if s.is_baseline:
             lines.append(f"  {s.version_id}  {s.total}  (基线)")
