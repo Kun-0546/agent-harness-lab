@@ -8,6 +8,7 @@ design-v0.3 §3.2 的四种接入方式,本模块都实现:
 """
 from __future__ import annotations
 
+import collections
 import importlib
 import json
 import os
@@ -84,8 +85,9 @@ except ValueError:
 class _CliSession(AgentSession):
     """外部命令行:起一个子进程,逐轮交换 JSON。
 
-    子进程 stdout 由一个后台线程读进队列;send() 等队列,超过 timeout 秒
-    没等到就判 agent 卡死 —— 杀进程、抛错,不会无限挂。
+    stdout、stderr 各由一个后台线程持续读:
+    - stdout 进队列,send() 等队列,超过 timeout 秒没等到就判卡死、杀进程、抛错。
+    - stderr 持续 drain —— 不读会填满 pipe、卡死子进程;留最近几行做报错用。
     timeout 默认 600 秒,可用环境变量 HDL_AGENT_TIMEOUT 改。
     """
 
@@ -97,7 +99,9 @@ class _CliSession(AgentSession):
             text=True, encoding="utf-8", env=_child_env(),
         )
         self._lines: queue.Queue = queue.Queue()
+        self._stderr_tail: collections.deque = collections.deque(maxlen=20)
         threading.Thread(target=self._read_stdout, daemon=True).start()
+        threading.Thread(target=self._drain_stderr, daemon=True).start()
 
     def _read_stdout(self) -> None:
         """后台线程:子进程 stdout 一行行塞进队列,EOF 塞 None。"""
@@ -105,6 +109,13 @@ class _CliSession(AgentSession):
         for line in self.proc.stdout:
             self._lines.put(line)
         self._lines.put(None)
+
+    def _drain_stderr(self) -> None:
+        """后台线程:持续读 stderr —— 不读会填满 pipe、卡死子进程;留最近几行报错用。"""
+        if self.proc.stderr is None:
+            return
+        for line in self.proc.stderr:
+            self._stderr_tail.append(line)
 
     def send(self, user_text: str) -> str:
         assert self.proc.stdin
@@ -117,7 +128,7 @@ class _CliSession(AgentSession):
             raise RuntimeError(
                 f"agent 这一轮超过 {self.timeout:g} 秒没回话,判定卡死") from None
         if line is None:
-            err = self.proc.stderr.read().strip()[:200] if self.proc.stderr else ""
+            err = "".join(self._stderr_tail).strip()[:200]
             raise RuntimeError(f"agent 没回话(进程已退出):{err}")
         return str(json.loads(line).get("response", ""))
 
