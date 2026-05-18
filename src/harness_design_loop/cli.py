@@ -245,7 +245,7 @@ def cmd_cases(args: argparse.Namespace) -> int:
         if c.max_turns is not None:
             bits.append(f"max_turns={c.max_turns}")
         if c.depends_on:
-            bits.append(f"前置={c.depends_on}")
+            bits.append(f"前置={c.depends_on}(暂未接入 run)")
         print("  " + "  ".join(bits))
         first = c.opening.splitlines()[0] if c.opening.strip() else "(空)"
         if len(first) > 42:

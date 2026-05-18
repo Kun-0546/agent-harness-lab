@@ -58,7 +58,7 @@ By default `run` and `score` use built-in stubs (a canned simulator and a hash-b
 
 Pre-MVP. The full `init → run → score → compare` pipeline runs end to end, but the tool is not yet validated on a real agent and has known gaps:
 
-- **Version isolation is not wired up.** `run` currently connects every version to the same agent, so `compare` does not yet reflect real differences between versions. This is the next thing to fix.
+- `depends_on` (seeding a case's opening context from a prior case) is parsed and shown, but `run` does not use it yet.
 - `run` / `score` default to stubs; real scoring needs `--llm` and API keys.
 - Only the "simulated" conversation mode is implemented; replay and scripted modes, the self-iterating run mode, environment snapshots, and noise/trial handling are not built yet.
 - No real case study yet — treat this as an architecture being proposed, not a result being reported.

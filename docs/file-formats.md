@@ -37,7 +37,7 @@
 命令:wsl python3 /path/to/agent.py
 ```
 
-- 本期 run 只实现「外部命令行」:子进程 + JSON 通信(stdin 收 `{"input": ...}`,stdout 回 `{"response": ...}`)。
+- 四种接入都已实现(见 examples/ 各一个样例)。外部命令行 = 子进程 + JSON 行:stdin 收 `{"input": ...}`,stdout 回 `{"response": ...}`。
 - agent 在 WSL 里,命令写 `wsl ...`。
 
 ---
@@ -111,7 +111,7 @@ PM 交给 coding agent 的实验指令,一个实验一份。
 id: D-01
 type: D                 # 可选;分类标签
 max_turns: 15           # 可选;对话轮次上限
-depends_on:             # 可选;另一 case 的 id —— 初始上下文来自它跑完的对话
+depends_on:             # 可选;另一 case 的 id。已解析,但 run 暂未用它(占位、不生效)
 ---
 ## 起始输入
 <开场那条用户消息>
