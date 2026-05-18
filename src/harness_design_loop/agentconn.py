@@ -11,7 +11,9 @@ from __future__ import annotations
 import importlib
 import json
 import os
+import queue
 import subprocess
+import threading
 import urllib.error
 import urllib.request
 
@@ -73,24 +75,50 @@ def _extract_reply(data: dict) -> str:
     raise RuntimeError(f"agent 回答里没有 response / choices 字段:{str(data)[:120]}")
 
 
-class _CliSession(AgentSession):
-    """外部命令行:起一个子进程,逐轮交换 JSON。"""
+try:
+    _TURN_TIMEOUT = float(os.environ.get("HDL_AGENT_TIMEOUT", "600"))
+except ValueError:
+    _TURN_TIMEOUT = 600.0
 
-    def __init__(self, command: str):
+
+class _CliSession(AgentSession):
+    """外部命令行:起一个子进程,逐轮交换 JSON。
+
+    子进程 stdout 由一个后台线程读进队列;send() 等队列,超过 timeout 秒
+    没等到就判 agent 卡死 —— 杀进程、抛错,不会无限挂。
+    timeout 默认 600 秒,可用环境变量 HDL_AGENT_TIMEOUT 改。
+    """
+
+    def __init__(self, command: str, timeout: float = _TURN_TIMEOUT):
+        self.timeout = timeout
         self.proc = subprocess.Popen(
             command, shell=True,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, encoding="utf-8", env=_child_env(),
         )
+        self._lines: queue.Queue = queue.Queue()
+        threading.Thread(target=self._read_stdout, daemon=True).start()
+
+    def _read_stdout(self) -> None:
+        """后台线程:子进程 stdout 一行行塞进队列,EOF 塞 None。"""
+        assert self.proc.stdout
+        for line in self.proc.stdout:
+            self._lines.put(line)
+        self._lines.put(None)
 
     def send(self, user_text: str) -> str:
-        assert self.proc.stdin and self.proc.stdout
+        assert self.proc.stdin
         self.proc.stdin.write(json.dumps({"input": user_text}, ensure_ascii=False) + "\n")
         self.proc.stdin.flush()
-        line = self.proc.stdout.readline()
-        if not line:
+        try:
+            line = self._lines.get(timeout=self.timeout)
+        except queue.Empty:
+            self.proc.kill()
+            raise RuntimeError(
+                f"agent 这一轮超过 {self.timeout:g} 秒没回话,判定卡死") from None
+        if line is None:
             err = self.proc.stderr.read().strip()[:200] if self.proc.stderr else ""
-            raise RuntimeError(f"agent 没回话:{err}")
+            raise RuntimeError(f"agent 没回话(进程已退出):{err}")
         return str(json.loads(line).get("response", ""))
 
     def close(self) -> None:
