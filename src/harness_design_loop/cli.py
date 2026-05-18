@@ -315,6 +315,10 @@ def cmd_versions(args: argparse.Namespace) -> int:
         if len(what) > 44:
             what = what[:44] + "…"
         print(f"    这是什么:{what}")
+        if v.connect is not None:
+            print(f"    接入:{v.connect.conn_type}(版本自带)")
+        else:
+            print("    接入:用全局 connect.md")
         for p in v.validate():
             total_problems += 1
             print(f"    ! {p}")
@@ -334,15 +338,6 @@ def cmd_run(args: argparse.Namespace) -> int:
     if exp_dir is None:
         print(f"找不到实验:{args.experiment}", file=sys.stderr)
         return 1
-    connect_path = Path.cwd() / "connect.md"
-    if not connect_path.exists():
-        print("当前目录没有 connect.md(先 hdl init / connect)", file=sys.stderr)
-        return 1
-    connect = parse_connect(connect_path)
-    if connect.conn_type not in CONNECT_TYPES:
-        print(f"接入类型「{connect.conn_type}」识别不了(应为:{' / '.join(CONNECT_TYPES)})",
-              file=sys.stderr)
-        return 1
     try:
         versions = load_versions(exp_dir)
         cases = load_testset(exp_dir)
@@ -351,6 +346,17 @@ def cmd_run(args: argparse.Namespace) -> int:
         return 1
     if not versions or not cases:
         print("versions/ 或 测试集/ 是空的,没法跑", file=sys.stderr)
+        return 1
+
+    # 全局 connect 是各版本的回退;版本自带接入的可以不靠它
+    connect_path = Path.cwd() / "connect.md"
+    connect = parse_connect(connect_path) if connect_path.exists() else None
+    global_ok = connect is not None and connect.conn_type in CONNECT_TYPES
+    no_conn = [v.version_id for v in versions if v.connect is None and not global_ok]
+    if no_conn:
+        print(f"这些版本没接入配置、全局 connect.md 也用不了:{'、'.join(no_conn)}",
+              file=sys.stderr)
+        print("  给版本加「类型」「配置」段,或在 connect.md 配好全局接入", file=sys.stderr)
         return 1
 
     if args.llm:

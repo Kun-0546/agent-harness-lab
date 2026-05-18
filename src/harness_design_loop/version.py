@@ -1,7 +1,9 @@
 """读一个实验的版本 —— 被测系统里摆出来对比的那几个 agent。
 
 版本 = experiments/<编号>/versions/ 目录,一个版本一个文件。
-其中一个标为基线(不动,当参照)。格式见 docs/file-formats.md。
+其中一个标为基线(不动,当参照)。
+版本可以在「类型」「配置」段里写自己的接入方式;不写就用全局 connect.md。
+格式见 docs/file-formats.md。
 """
 from __future__ import annotations
 
@@ -9,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from harness_design_loop import mdutil
+from harness_design_loop.connect import Connect
 
 _YES = {"是", "yes", "true", "y", "1", "基线"}
 
@@ -20,8 +23,8 @@ class Version:
     path: Path
     version_id: str = ""
     is_baseline: bool = False
-    what: str = ""       # 这是什么(基线 / 改了什么)
-    setup: str = ""      # 接入配置
+    what: str = ""                       # 这是什么(基线 / 改了什么)
+    connect: Connect | None = None       # 版本自带的接入;None = 用全局 connect.md
 
     def validate(self) -> list[str]:
         """返回问题清单;空清单表示没问题。"""
@@ -30,8 +33,8 @@ class Version:
             problems.append("缺 id")
         if not mdutil.is_filled(self.what):
             problems.append("没写「这是什么」")
-        if not mdutil.is_filled(self.setup):
-            problems.append("没写接入配置")
+        if self.connect is not None:
+            problems += [f"接入配置:{p}" for p in self.connect.validate()]
         return problems
 
 
@@ -44,7 +47,13 @@ def parse_version(path: str | Path) -> Version:
     v.version_id = fields.get("id", "").strip() or path.stem
     v.is_baseline = fields.get("基线", "").strip().lower() in _YES
     v.what = sections.get("这是什么", "").strip()
-    v.setup = sections.get("接入配置", "").strip()
+    conn_type = sections.get("类型", "").strip()
+    if mdutil.is_filled(conn_type):
+        v.connect = Connect(
+            path=path,
+            conn_type=conn_type,
+            config=sections.get("配置", "").strip(),
+        )
     return v
 
 

@@ -46,18 +46,27 @@ def run_agent_session(connect: Connect, opening: str, simulator: Simulator,
     return transcript
 
 
-def run_experiment(connect: Connect, versions: list[Version],
+def run_experiment(connect: Connect | None, versions: list[Version],
                    cases: list[TestCase], simulator: Simulator) -> list[CaseRun]:
-    """每个版本过一遍测试集(多轮)。每跑完一个 case 打一行进度。"""
+    """每个版本过一遍测试集(多轮)。每跑完一个 case 打一行进度。
+
+    每个版本用自己的接入(version.connect);没有就回退到全局 connect。
+    """
     runs: list[CaseRun] = []
     total = len(versions) * len(cases)
     done = 0
     for v in versions:
+        v_connect = v.connect or connect
         for c in cases:
             done += 1
             print(f"  [{done}/{total}] {v.version_id} / {c.case_id} …", flush=True)
+            if v_connect is None:
+                runs.append(CaseRun(v.version_id, c.case_id, error="没有接入配置"))
+                print(f"  [{done}/{total}] {v.version_id} / {c.case_id} ✗ 没有接入配置",
+                      flush=True)
+                continue
             try:
-                tr = run_agent_session(connect, c.opening, simulator, c.max_turns or 8)
+                tr = run_agent_session(v_connect, c.opening, simulator, c.max_turns or 8)
                 runs.append(CaseRun(v.version_id, c.case_id, transcript=tr))
                 print(f"  [{done}/{total}] {v.version_id} / {c.case_id} ✓ {len(tr)} 轮",
                       flush=True)
