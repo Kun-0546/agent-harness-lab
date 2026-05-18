@@ -8,6 +8,7 @@ import sys
 import time
 from pathlib import Path
 
+from harness_design_loop import report, templates
 from harness_design_loop.comparator import compare_scores
 from harness_design_loop.connect import CONNECT_TYPES, parse_connect
 from harness_design_loop.grader import llm_grader, score_run, stub_grader
@@ -25,66 +26,6 @@ from harness_design_loop.simulator import (
 )
 from harness_design_loop.testset import load_testset
 from harness_design_loop.version import load_versions
-
-PROGRAM_TEMPLATE = """# 实验 {name} · program
-
-## 假设
-<这次实验想验证什么>
-
-## 声明
-- 环境:<被测环境是什么 + 取的初始状态;无环境写"无">
-- 对话模式:<模拟 / 回放 / 固定>
-- 状态:<累积 / 重置>
-- 评分:<评分器类型(规则脚本 / LLM Judge / 组合)+ 打分粒度>
-- 运行模式:<人评 / 自迭代>
-- 对比方式:<对基线 / 线性迭代;多版本怎么比,默认 对基线、可不写>
-
-## 留/丢规则
-<一个改动满足什么算"留下",否则回滚;人评模式留空>
-
-## 喊人规则
-<coding agent 跑到什么情况停下、交回 PM;人评模式留空>
-"""
-
-RUBRIC_TEMPLATE = """# rubric
-
-> 评分维度 + 权重,从实验 goal 推导。权重之和 = 1.0(或写百分数,和 = 100)。
-
-## <维度名,例:战略深度>
-权重: <0-1>
-<这个维度衡量什么、怎么判高低分>
-
-## <维度名>
-权重: <0-1>
-<...>
-"""
-
-CONNECT_TEMPLATE = """# connect —— 工具怎么接到被测 agent
-
-## 类型
-<进程内库 / 外部命令行 / HTTP无状态 / HTTP有状态>
-
-## 配置
-<外部命令行:跑 agent 的命令(agent 在 WSL 就写 wsl ...);HTTP:端点 URL;进程内库:可 import 的模块>
-"""
-
-GOAL_TEMPLATE = """# goal —— 总目标
-
-<你想把这个 agent 变成什么样。
-这一层内部怎么写(怎么 engineer),按你的 Goal Engineering 方法 —— 待补。>
-"""
-
-SIMULATOR_TEMPLATE = """# 模拟器 —— 模拟模式下扮用户的那个 agent
-
-## 人设
-<模拟器扮谁;例:一个 CEO,沟通直接、要数据、被说服前会追问>
-
-## 背景知识
-<喂给模拟器的背景材料;它扮的人知道什么(可留空)>
-
-## 追问策略
-<怎么追问:盯没答透的点、适时换角度、什么时候收尾>
-"""
 
 
 def _experiments_dir() -> Path:
@@ -105,7 +46,8 @@ def _next_number() -> str:
 def cmd_init(args: argparse.Namespace) -> int:
     root = Path.cwd()
     created = []
-    for name, content in (("connect.md", CONNECT_TEMPLATE), ("goal.md", GOAL_TEMPLATE)):
+    for name, content in (("connect.md", templates.CONNECT_TEMPLATE),
+                          ("goal.md", templates.GOAL_TEMPLATE)):
         p = root / name
         if p.exists():
             print(f"已存在,跳过:{name}")
@@ -151,9 +93,9 @@ def cmd_new(args: argparse.Namespace) -> int:
         return 1
     exp_dir.mkdir(parents=True)
     (exp_dir / "program.md").write_text(
-        PROGRAM_TEMPLATE.replace("{name}", exp_name), encoding="utf-8")
-    (exp_dir / "rubric.md").write_text(RUBRIC_TEMPLATE, encoding="utf-8")
-    (exp_dir / "模拟器.md").write_text(SIMULATOR_TEMPLATE, encoding="utf-8")
+        templates.PROGRAM_TEMPLATE.replace("{name}", exp_name), encoding="utf-8")
+    (exp_dir / "rubric.md").write_text(templates.RUBRIC_TEMPLATE, encoding="utf-8")
+    (exp_dir / "模拟器.md").write_text(templates.SIMULATOR_TEMPLATE, encoding="utf-8")
     (exp_dir / "测试集").mkdir()
     (exp_dir / "versions").mkdir()
     print(f"建好实验:{exp_name}")
@@ -492,52 +434,12 @@ def cmd_compare(args: argparse.Namespace) -> int:
     program_path = exp_dir / "program.md"
     mode = parse_program(program_path).compare_mode if program_path.exists() else "对基线"
     comparison = compare_scores(scores, baseline_id, mode)
-    summaries = comparison.versions
-
-    lines = [
-        f"实验:{exp_dir.name}",
-        f"对比:{score_file.name}  评分器:{data.get('grader', '?')}",
-        f"对比方式:{comparison.mode}",
-    ]
-    if comparison.mode != "线性迭代":
-        lines.append(f"基线:{baseline_id or '(无 —— versions/ 里没标基线,只列总分)'}")
-    if not comparison.coverage_even:
-        lines.append("")
-        lines.append("⚠ 版本间题目覆盖不一致 —— 总分、差值只在共同题上算:"
-                      + "、".join(comparison.basis_cases))
-        for s in summaries:
-            if s.missing:
-                lines.append(f"   {s.version_id} 缺:" + "、".join(s.missing))
-    ref_label = "起点" if comparison.mode == "线性迭代" else "基线"
-    lines += ["", "版本总分:"]
-    for s in summaries:
-        if s.total_delta is None:
-            lines.append(f"  {s.version_id}  {s.total}  ({ref_label})")
-        else:
-            sign = "+" if s.total_delta >= 0 else ""
-            lines.append(
-                f"  {s.version_id}  {s.total}  vs {s.compared_to} {sign}{s.total_delta}")
-
-    graded = [s for s in summaries if s.dimension_delta]
-    if graded:
-        lines += ["", "维度变化:"]
-        for s in graded:
-            parts = []
-            for dn, d in s.dimension_delta.items():
-                sign = "+" if d >= 0 else ""
-                mark = "↓" if d < 0 else ""
-                parts.append(f"{dn}{sign}{d}{mark}")
-            lines.append(f"  {s.version_id}(vs {s.compared_to})  " + "  ".join(parts))
-        lines += ["", "退化维度:"]
-        for s in graded:
-            lines.append(f"  {s.version_id}:{'、'.join(s.regressed) if s.regressed else '无'}")
-
-    lines += ["", "注:差异稳不稳(噪声)要多跑几次 trial 才知道,本期没算。"]
-    report = "\n".join(lines)
-    print(report)
+    report_text = report.build_compare_report(
+        exp_dir.name, score_file.name, data.get("grader", "?"), baseline_id, comparison)
+    print(report_text)
 
     out_path = results_dir / f"compare-{time.strftime('%Y%m%d-%H%M%S')}.md"
-    out_path.write_text(report + "\n", encoding="utf-8")
+    out_path.write_text(report_text + "\n", encoding="utf-8")
     print(f"\n对比报告存到:{out_path}")
     return 0
 
