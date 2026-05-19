@@ -1,4 +1,4 @@
-"""端到端测试 —— 跑通 workflow.run → score → compare。
+"""端到端测试 —— 跑通 run → score → compare,workflow 层和 CLI 层各一遍。
 
 把一直手跑的 smoke 固化成自动化测试:临时工作区里搭一个最小实验,
 用一个进程内桩 agent,过一遍 run / score / compare,断言每步产出。
@@ -8,12 +8,13 @@ from __future__ import annotations
 
 import contextlib
 import io
+import os
 import sys
 import tempfile
 import unittest
 from pathlib import Path
 
-from harness_design_loop import workflow
+from harness_design_loop import cli, workflow
 
 # 一个最小的「进程内库」agent —— 回显最后一句用户话。
 _AGENT_MODULE = '''\
@@ -75,16 +76,16 @@ class TestEndToEnd(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        root = Path(self._tmp.name)
+        self.root = Path(self._tmp.name)
 
         # 桩 agent 模块,放进工作区根并挂上 import 路径
-        (root / "e2e_stub_agent.py").write_text(_AGENT_MODULE, encoding="utf-8")
-        sys.path.insert(0, str(root))
-        self.addCleanup(lambda: sys.path.remove(str(root)))
+        (self.root / "e2e_stub_agent.py").write_text(_AGENT_MODULE, encoding="utf-8")
+        sys.path.insert(0, str(self.root))
+        self.addCleanup(lambda: sys.path.remove(str(self.root)))
         self.addCleanup(lambda: sys.modules.pop("e2e_stub_agent", None))
 
-        (root / "connect.md").write_text(_CONNECT, encoding="utf-8")
-        self.exp = root / "experiments" / "001-e2e"
+        (self.root / "connect.md").write_text(_CONNECT, encoding="utf-8")
+        self.exp = self.root / "experiments" / "001-e2e"
         (self.exp / "测试集").mkdir(parents=True)
         (self.exp / "versions").mkdir()
         (self.exp / "program.md").write_text(_PROGRAM, encoding="utf-8")
@@ -93,25 +94,35 @@ class TestEndToEnd(unittest.TestCase):
         (self.exp / "versions" / "V2.md").write_text(_V2, encoding="utf-8")
         (self.exp / "测试集" / "D-01.md").write_text(_CASE, encoding="utf-8")
 
-    def test_run_score_compare(self) -> None:
+    def test_workflow_run_score_compare(self) -> None:
+        """workflow 层:直接调 run / score / compare。"""
         with contextlib.redirect_stdout(io.StringIO()):
             run = workflow.run(self.exp, use_llm=False)
             score = workflow.score(self.exp, use_llm=False)
             comp = workflow.compare(self.exp)
 
-        # run:2 版本 × 1 case,都成功
         self.assertEqual(run.total, 2)
         self.assertEqual(run.failed, 0)
         self.assertTrue(run.out_path.exists())
-
-        # score:两个版本都打了分
         self.assertEqual(len(score.by_version), 2)
         self.assertTrue(score.out_path.exists())
-
-        # compare:出了对比报告
         self.assertIn("V1", comp.report_text)
         self.assertIn("V2", comp.report_text)
         self.assertTrue(comp.out_path.exists())
+
+    def test_cli_run_score_compare(self) -> None:
+        """CLI 层:走 cli.main 真入口(argparse + cmd_ 包装)。"""
+        original = Path.cwd()
+        os.chdir(self.root)
+        self.addCleanup(os.chdir, original)
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(cli.main(["run", "001"]), 0)
+            self.assertEqual(cli.main(["score", "001"]), 0)
+            self.assertEqual(cli.main(["compare", "001"]), 0)
+        results = self.exp / "results"
+        self.assertTrue(list(results.glob("run-*.json")))
+        self.assertTrue(list(results.glob("score-*.json")))
+        self.assertTrue(list(results.glob("compare-*.md")))
 
 
 if __name__ == "__main__":
