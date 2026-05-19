@@ -13,9 +13,9 @@ from pathlib import Path
 
 from harness_design_loop import report
 from harness_design_loop.comparator import compare_scores
-from harness_design_loop.connect import CONNECT_TYPES, parse_connect
+from harness_design_loop.connect import parse_connect
 from harness_design_loop.grader import llm_grader, score_run, stub_grader
-from harness_design_loop.program import parse_program
+from harness_design_loop.program import Program, parse_program
 from harness_design_loop.rubric import parse_rubric
 from harness_design_loop.runner import run_experiment
 from harness_design_loop.simulator import (
@@ -61,26 +61,49 @@ class CompareResult:
     out_path: Path
 
 
-def run_preflight(versions: list[Version], cases: list[TestCase]) -> list[str]:
+def baseline_problems(versions: list[Version], compare_mode: str) -> list[str]:
+    """按对比方式查基线版本的数量。返回问题清单;空清单 = 没问题。
+
+    对基线:必须恰好一个标了「基线」的版本。线性迭代:不要求基线(链式比)。
+    """
+    baselines = [v.version_id for v in versions if v.is_baseline]
+    if compare_mode == "对基线":
+        if len(baselines) == 0:
+            return ["对比方式=对基线,但 versions/ 里没有标基线的版本(要恰好 1 个)"]
+        if len(baselines) > 1:
+            return [f"对比方式=对基线,但有 {len(baselines)} 个版本标了基线"
+                    f"(只能 1 个):{'、'.join(baselines)}"]
+    return []
+
+
+def run_preflight(program: Program, versions: list[Version],
+                  cases: list[TestCase]) -> list[str]:
     """run 前的聚合校验。返回带来源标注的问题清单;空清单 = 可以跑。
 
-    专门拦那些会被静默跑过去的坏数据 —— 最典型的是 case 段名写错
-    (写成「## 初始输入」而不是「## 起始输入」),起始输入解析成空串,
-    run 不报错、直接把空输入发给 agent。
+    把 hdl show / versions / cases 各自能查到的问题,在跑之前一次性拦下。
+    最典型的是 case 段名写错(「## 初始输入」而非「## 起始输入」),起始输入
+    解析成空串,run 不报错、直接把空输入发给 agent。program 没填、版本缺
+    「这是什么」、基线数量不对同理 —— show 里看得到的,run 不该绕过。
     """
     problems: list[str] = []
+    problems += [f"program:{p}" for p in program.validate()]
     for v in versions:
         problems += [f"版本 {v.version_id}:{p}" for p in v.validate()]
     for c in cases:
         problems += [f"case {c.case_id}:{p}" for p in c.validate()]
+    problems += baseline_problems(versions, program.compare_mode)
     return problems
 
 
 def run(exp_dir: Path, use_llm: bool) -> RunResult:
     """跑实验:加载 → 校验 → 每个版本过测试集 → 存对话。
 
-    校验不过、没有可用接入、模拟器配置缺失,都抛 WorkflowError。
+    program / 版本 / case / 基线数量 / 接入配置 任一不过,都抛 WorkflowError。
     """
+    program_path = exp_dir / "program.md"
+    if not program_path.exists():
+        raise WorkflowError(f"实验里没有 program.md:{exp_dir}")
+    program = parse_program(program_path)
     try:
         versions = load_versions(exp_dir)
         cases = load_testset(exp_dir)
@@ -89,21 +112,29 @@ def run(exp_dir: Path, use_llm: bool) -> RunResult:
     if not versions or not cases:
         raise WorkflowError("versions/ 或 测试集/ 是空的,没法跑")
 
-    problems = run_preflight(versions, cases)
+    problems = run_preflight(program, versions, cases)
     if problems:
         raise WorkflowError(
-            "跑不了,先修下面的问题(hdl versions / hdl cases 可单独查):\n  - "
+            "跑不了,先修下面的问题(hdl show / versions / cases 可单独查):\n  - "
             + "\n  - ".join(problems))
 
-    # 全局 connect 是各版本的回退;版本自带接入的可以不靠它
-    connect_path = Path.cwd() / "connect.md"
+    # 接入:版本自带的优先;没有就回退工作区根的 connect.md。
+    # connect.md 在 project root,从 exp_dir 反推(experiments/<编号>/ 的上两级),
+    # 不靠当前 shell 在哪。
+    connect_path = exp_dir.parents[1] / "connect.md"
     connect = parse_connect(connect_path) if connect_path.exists() else None
-    global_ok = connect is not None and connect.conn_type in CONNECT_TYPES
-    no_conn = [v.version_id for v in versions if v.connect is None and not global_ok]
-    if no_conn:
-        raise WorkflowError(
-            f"这些版本没接入配置、全局 connect.md 也用不了:{'、'.join(no_conn)}\n"
-            "  给版本加「类型」「配置」段,或在 connect.md 配好全局接入")
+    needs_global = [v.version_id for v in versions if v.connect is None]
+    if needs_global:
+        if connect is None:
+            raise WorkflowError(
+                f"这些版本要用全局 connect.md:{'、'.join(needs_global)}\n"
+                "  但工作区根没有 connect.md(hdl init 会生成),"
+                "或给这些版本各自加「类型」「配置」段")
+        connect_issues = connect.validate()
+        if connect_issues:
+            raise WorkflowError(
+                f"这些版本要用全局 connect.md:{'、'.join(needs_global)}\n"
+                "  但 connect.md 有问题:\n  - " + "\n  - ".join(connect_issues))
 
     if use_llm:
         sim_path = exp_dir / "模拟器.md"
@@ -197,7 +228,7 @@ def score(exp_dir: Path, use_llm: bool) -> ScoreResult:
 def compare(exp_dir: Path) -> CompareResult:
     """把最近一次 score 的各版本分数放一起比,产出对比报告。
 
-    没有 score 结果、分数为空,都抛 WorkflowError。
+    没有 score 结果、分数为空、基线数量不对,都抛 WorkflowError。
     """
     results_dir = exp_dir / "results"
     score_files = sorted(results_dir.glob("score-*.json")) if results_dir.exists() else []
@@ -213,9 +244,12 @@ def compare(exp_dir: Path) -> CompareResult:
         versions = load_versions(exp_dir)
     except FileNotFoundError:
         versions = []
-    baseline_id = next((v.version_id for v in versions if v.is_baseline), "")
     program_path = exp_dir / "program.md"
     mode = parse_program(program_path).compare_mode if program_path.exists() else "对基线"
+    bproblems = baseline_problems(versions, mode)
+    if bproblems:
+        raise WorkflowError("compare 跑不了:\n  - " + "\n  - ".join(bproblems))
+    baseline_id = next((v.version_id for v in versions if v.is_baseline), "")
     comparison = compare_scores(scores, baseline_id, mode)
     report_text = report.build_compare_report(
         exp_dir.name, score_file.name, data.get("grader", "?"), baseline_id, comparison)
