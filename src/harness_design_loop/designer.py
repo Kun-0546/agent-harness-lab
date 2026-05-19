@@ -36,6 +36,12 @@ class DraftPackage:
 
 # ---- 本地桩 ----
 
+def _sentence(text: str) -> str:
+    """收尾成一句:去首尾空白,没有句末标点才补一个句号(避免拼出「。。」)。"""
+    text = text.strip()
+    return text if text[-1:] in "。.!?！？" else text + "。"
+
+
 def stub_designer(brief: Brief, goal: str) -> DraftPackage:
     """桩 Designer:出一套写死但合法的实验,不调模型,验 draft 流程用。
 
@@ -58,16 +64,16 @@ def stub_designer(brief: Brief, goal: str) -> DraftPackage:
         "V1.md": ("---\nid: V1\n基线: 是\n---\n"
                   "## 这是什么\n基线版:改动前的 agent。\n"),
         "V2.md": ("---\nid: V2\n基线: 否\n---\n"
-                  f"## 这是什么\n改动版:{brief.change or '待填'}。\n"),
+                  f"## 这是什么\n改动版:{_sentence(brief.change or '待填')}\n"),
     }
     cases = {
         "D-01.md": ("---\nid: D-01\nmax_turns: 4\n---\n"
-                    f"## 起始输入\n{brief.optimize or '帮我处理一个典型任务'}。\n\n"
+                    f"## 起始输入\n{_sentence(brief.optimize or '帮我处理一个典型任务')}\n\n"
                     "## 完成标准\nagent 给出可用、扣题的回应。\n"),
     }
     rubric = (
         "# rubric\n\n"
-        f"## 表现\n权重: 0.5\n{brief.care or '回答好不好'}。\n\n"
+        f"## 表现\n权重: 0.5\n{_sentence(brief.care or '回答好不好')}\n\n"
         f"## 红线\n权重: 0.5\n{brief.redlines or '不该出现的退化'} —— 退化即扣分。\n"
     )
     simulator = (

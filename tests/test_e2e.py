@@ -125,5 +125,53 @@ class TestEndToEnd(unittest.TestCase):
         self.assertTrue(list(results.glob("compare-*.md")))
 
 
+class TestDraftEndToEnd(unittest.TestCase):
+    """V2:hdl draft 两阶段(stub Designer)→ 起草出的实验直接 run / score / compare。"""
+
+    BRIEF = (
+        "# brief — demo\n\n"
+        "## 想优化什么\n让 agent 回答更简洁\n\n"
+        "## 验证什么改动\n砍掉开场寒暄\n\n"
+        "## 最在意什么\n回答密度\n\n"
+        "## 不能牺牲什么\n不能漏关键信息\n\n"
+        "## 怎么比\n对基线\n"
+    )
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name)
+
+        (self.root / "e2e_stub_agent.py").write_text(_AGENT_MODULE, encoding="utf-8")
+        sys.path.insert(0, str(self.root))
+        self.addCleanup(lambda: sys.path.remove(str(self.root)))
+        self.addCleanup(lambda: sys.modules.pop("e2e_stub_agent", None))
+
+        (self.root / "connect.md").write_text(_CONNECT, encoding="utf-8")
+        (self.root / "goal.md").write_text(
+            "# goal\n把 agent 做成简洁、可靠的助手。\n", encoding="utf-8")
+
+    def test_draft_then_run(self) -> None:
+        original = Path.cwd()
+        os.chdir(self.root)
+        self.addCleanup(os.chdir, original)
+        exp = self.root / "experiments" / "001-demo"
+        with contextlib.redirect_stdout(io.StringIO()):
+            # 首阶段:建 brief.md
+            self.assertEqual(cli.main(["draft", "demo"]), 0)
+            self.assertTrue((exp / "brief.md").exists())
+            # 人填 brief.md
+            (exp / "brief.md").write_text(self.BRIEF, encoding="utf-8")
+            # 次阶段:stub Designer 起草整套实验
+            self.assertEqual(cli.main(["draft", "demo"]), 0)
+            # 起草出的实验应能直接跑通
+            self.assertEqual(cli.main(["run", "001"]), 0)
+            self.assertEqual(cli.main(["score", "001"]), 0)
+            self.assertEqual(cli.main(["compare", "001"]), 0)
+        self.assertTrue((exp / "program.md").exists())
+        self.assertTrue((exp / "review.md").exists())
+        self.assertTrue(list((exp / "results").glob("compare-*.md")))
+
+
 if __name__ == "__main__":
     unittest.main()

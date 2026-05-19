@@ -11,7 +11,8 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from harness_design_loop import report
+from harness_design_loop import designer, report
+from harness_design_loop.brief import parse_brief
 from harness_design_loop.comparator import compare_scores
 from harness_design_loop.connect import parse_connect
 from harness_design_loop.grader import llm_grader, score_run, stub_grader
@@ -257,3 +258,90 @@ def compare(exp_dir: Path) -> CompareResult:
     out_path = results_dir / f"compare-{time.strftime('%Y%m%d-%H%M%S')}.md"
     out_path.write_text(report_text + "\n", encoding="utf-8")
     return CompareResult(report_text=report_text, out_path=out_path)
+
+
+@dataclass
+class DraftResult:
+    """一次 draft 的产出。"""
+
+    review_path: Path
+    files: list[str]   # 起草出的文件(相对实验目录)
+
+
+def _build_review(exp_name, brief, program, versions, cases, rubric) -> str:
+    """拼 review.md —— 人只看这一份就能审完 Designer 起草的实验。"""
+    lines = [f"# review — {exp_name}", "",
+             f"- 实验目标:{program.assumption or '(空)'}"]
+    for v in versions:
+        tag = "(基线)" if v.is_baseline else ""
+        what = v.what.splitlines()[0] if v.what.strip() else "(空)"
+        lines.append(f"- {v.version_id}{tag}:{what}")
+    dims = "、".join(f"{d.name} {d.weight:g}" for d in rubric.dimensions
+                     if d.weight is not None)
+    lines.append(f"- rubric:{dims or '(空)'}")
+    lines.append(f"- 红线(来自 brief):{brief.redlines}")
+    lines.append(f"- 测试集:{len(cases)} 个 case")
+    lines.append("- 来源:program / versions / 测试集 / rubric / 模拟器 "
+                 "都是 Designer 起草、待你确认。")
+    lines += ["", "重点核 rubric 和红线 —— 它们是锚点;要改就直接改对应文件。"]
+    return "\n".join(lines) + "\n"
+
+
+def draft(exp_dir: Path, use_llm: bool) -> DraftResult:
+    """据 brief.md 让 Designer 起草整套实验定义(V2 的 agent-drafted 入口)。
+
+    读 brief + goal → Designer 起草 → 落盘 → 校验产物真能跑 → 出 review.md。
+    brief 没填全、Designer 失败、起草的实验过不了校验,都抛 WorkflowError。
+    """
+    brief_path = exp_dir / "brief.md"
+    if not brief_path.exists():
+        raise WorkflowError(f"实验里没有 brief.md:{exp_dir}")
+    brief = parse_brief(brief_path)
+    brief_problems = brief.validate()
+    if brief_problems:
+        raise WorkflowError(
+            "brief.md 没填全,Designer 起草不了:\n  - " + "\n  - ".join(brief_problems))
+
+    goal_path = exp_dir.parents[1] / "goal.md"
+    goal = goal_path.read_text(encoding="utf-8") if goal_path.exists() else ""
+
+    try:
+        pkg = designer.design(brief, goal, use_llm)
+    except designer.DesignerError as e:
+        raise WorkflowError(str(e)) from e
+
+    # 落盘
+    (exp_dir / "测试集").mkdir(exist_ok=True)
+    (exp_dir / "versions").mkdir(exist_ok=True)
+    (exp_dir / "program.md").write_text(pkg.program, encoding="utf-8")
+    (exp_dir / "rubric.md").write_text(pkg.rubric, encoding="utf-8")
+    (exp_dir / "模拟器.md").write_text(pkg.simulator, encoding="utf-8")
+    written = ["program.md", "rubric.md", "模拟器.md"]
+    for fname, content in pkg.versions.items():
+        (exp_dir / "versions" / fname).write_text(content, encoding="utf-8")
+        written.append(f"versions/{fname}")
+    for fname, content in pkg.cases.items():
+        (exp_dir / "测试集" / fname).write_text(content, encoding="utf-8")
+        written.append(f"测试集/{fname}")
+
+    # 校验:Designer 起草的实验得真能跑(program / 版本 / case / 基线 / rubric / 模拟器)
+    try:
+        program = parse_program(exp_dir / "program.md")
+        versions = load_versions(exp_dir)
+        cases = load_testset(exp_dir)
+    except (FileNotFoundError, NotImplementedError, ValueError) as e:
+        raise WorkflowError(f"Designer 起草的实验解析不了:{e}") from e
+    rubric = parse_rubric(exp_dir / "rubric.md")
+    problems = run_preflight(program, versions, cases)
+    problems += [f"rubric:{p}" for p in rubric.validate()]
+    problems += [f"模拟器:{p}" for p in parse_simulator(exp_dir / "模拟器.md").validate()]
+    if problems:
+        raise WorkflowError(
+            "Designer 起草的实验没过校验,别用(改 brief 后 hdl draft --force 重来):\n  - "
+            + "\n  - ".join(problems))
+
+    review_path = exp_dir / "review.md"
+    review_path.write_text(
+        _build_review(exp_dir.name, brief, program, versions, cases, rubric),
+        encoding="utf-8")
+    return DraftResult(review_path=review_path, files=written)
