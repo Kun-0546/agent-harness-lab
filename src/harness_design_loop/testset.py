@@ -17,6 +17,8 @@ from harness_design_loop.program import parse_program
 class TestCase:
     """一个测试 case(模拟模式)。"""
 
+    __test__ = False   # 业务数据类 —— 不参与 pytest 测试收集
+
     path: Path
     case_id: str = ""
     type: str = ""                  # 可选的分类标签
