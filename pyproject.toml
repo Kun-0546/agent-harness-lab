@@ -1,6 +1,6 @@
 [project]
 name = "harness-design-loop"
-version = "0.0.1"
+version = "0.1.0"
 description = "A loop for AI product research: a coding agent runs experiments, a PM steers the goal."
 requires-python = ">=3.10"
 dependencies = []

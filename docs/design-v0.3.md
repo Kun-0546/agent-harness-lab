@@ -1,9 +1,9 @@
 # Harness Design Loop · 设计方案 v0.3
 
-> 状态：抽象、三层模型、完整流程都已逐轮对齐。各文件的具体格式和 CLI 命令待定。
-> 项目名：Harness Design Loop（2026-05-17 定名）。
-> 日期：2026-05-17。取代 v0.2，v0.1、v0.2 留作历史。
-> 本文档先于文件格式细化、README、代码。
+> 本文是 hdl **v1 的架构**：抽象、三层模型、两个角色、完整流程。
+> 已实现的文件格式见 `file-formats.md`，CLI 以 README 和 `hdl --help` 为准。
+> v2 及以后的方向见 `design-v0.4.1.md`。
+> 项目名：Harness Design Loop。日期：2026-05-17。v0.1 / v0.2 是更早的草稿，在 archive/。
 
 ---
 
