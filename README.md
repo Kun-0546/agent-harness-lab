@@ -56,7 +56,7 @@ By default `run` and `score` use built-in stubs (a canned simulator and a hash-b
 
 ## Status
 
-**v1 — a trusted manual loop.** The full `init → run → score → compare` pipeline runs end to end and rejects malformed input up front. The `--llm` path (real simulator + LLM judge) has been exercised on a real experiment, not only the built-in stubs. Known gaps:
+**v1 — a trusted manual loop.** The full `init → run → score → compare` pipeline runs end to end and rejects malformed input up front. The `--llm` path (real simulator + LLM judge) has been run end to end in a local experiment, not only on the built-in stubs; no polished case study is published yet. Known gaps:
 
 - `depends_on` (seeding a case's opening context from a prior case) is parsed and shown, but `run` does not use it yet.
 - `run` / `score` default to stubs; real scoring needs `--llm` and API keys.

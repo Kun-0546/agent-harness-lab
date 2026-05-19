@@ -1,6 +1,7 @@
 # Harness Design Loop · 文件格式
 
-> 工具读写的所有文件格式。配合 `design-v0.3.md`(架构)看。
+> 本文描述 hdl **v1 当前已实现**的文件格式 —— 工具实际读写的。配合架构文档 `archive/design-v0.3.md` 看。
+> v2 规划的格式(brief.md、review.md、calibration/、authority matrix、provenance)见 `design-v0.4.1.md`,尚未实现、不在本文。
 > 日期:2026-05-17,随代码更新。各格式都对着 `src/harness_design_loop/` 的解析代码核过。
 
 ## 工作目录

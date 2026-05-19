@@ -56,7 +56,7 @@ hdl compare 001              # 比较各版本
 
 ## 状态
 
-**v1 —— 可信的手动 loop。** `init → run → score → compare` 整条管线能端到端跑通，跑前会拦下坏输入。`--llm`（真实模拟器 + LLM judge）在一个真实实验上跑过，不只是内置桩。已知缺口：
+**v1 —— 可信的手动 loop。** `init → run → score → compare` 整条管线能端到端跑通，跑前会拦下坏输入。`--llm`（真实模拟器 + LLM judge）已在本地的一次真实实验里端到端跑通，不只是内置桩;公开 case study 尚未整理。已知缺口：
 
 - `depends_on`（用前一个 case 跑完的对话给后一个 case 当起始上下文）已解析、也会显示，但 `run` 还没用它。
 - `run` / `score` 默认走桩；真实打分要 `--llm` 和 API key。
