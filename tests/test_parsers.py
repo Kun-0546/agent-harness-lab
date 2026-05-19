@@ -1,8 +1,9 @@
-"""文件解析器的单测 —— program / rubric / version / connect / 测试集。"""
+"""文件解析器的单测 —— program / rubric / version / connect / 测试集 / brief。"""
 import tempfile
 import unittest
 from pathlib import Path
 
+from harness_design_loop.brief import parse_brief
 from harness_design_loop.connect import parse_connect
 from harness_design_loop.program import parse_program
 from harness_design_loop.rubric import parse_rubric
@@ -132,6 +133,37 @@ class TestTestset(_MdCase):
     def test_validate_missing_opening(self):
         c = parse_sim_case(self._md("---\nid: D-01\n---\n## 起始输入\n\n"))
         self.assertTrue(any("起始输入" in p for p in c.validate()))
+
+
+class TestBrief(_MdCase):
+    BRIEF = (
+        "# brief — X\n\n"
+        "## 想优化什么\n让回答更简洁\n\n"
+        "## 验证什么改动\n砍掉开场寒暄\n\n"
+        "## 最在意什么\n回答密度\n\n"
+        "## 不能牺牲什么\n不能漏关键信息\n\n"
+        "## 怎么比\n对基线\n"
+    )
+
+    def test_parse(self):
+        b = parse_brief(self._md(self.BRIEF))
+        self.assertEqual(b.optimize, "让回答更简洁")
+        self.assertEqual(b.change, "砍掉开场寒暄")
+        self.assertEqual(b.redlines, "不能漏关键信息")
+        self.assertEqual(b.compare, "对基线")
+
+    def test_validate_ok(self):
+        self.assertEqual(parse_brief(self._md(self.BRIEF)).validate(), [])
+
+    def test_validate_missing_section(self):
+        # 「最在意什么」空着
+        b = parse_brief(self._md(self.BRIEF.replace("回答密度", "")))
+        self.assertTrue(any("最在意什么" in p for p in b.validate()))
+
+    def test_compare_is_optional(self):
+        # 「怎么比」可空 —— 不该报问题
+        b = parse_brief(self._md(self.BRIEF.replace("对基线", "")))
+        self.assertEqual(b.validate(), [])
 
 
 if __name__ == "__main__":
