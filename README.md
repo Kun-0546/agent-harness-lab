@@ -56,12 +56,14 @@ By default `run` and `score` use built-in stubs (a canned simulator and a hash-b
 
 ## Status
 
-Pre-MVP. The full `init → run → score → compare` pipeline runs end to end, but the tool is not yet validated on a real agent and has known gaps:
+**v1 — a trusted manual loop.** The full `init → run → score → compare` pipeline runs end to end and rejects malformed input up front. The `--llm` path (real simulator + LLM judge) has been exercised on a real experiment, not only the built-in stubs. Known gaps:
 
 - `depends_on` (seeding a case's opening context from a prior case) is parsed and shown, but `run` does not use it yet.
 - `run` / `score` default to stubs; real scoring needs `--llm` and API keys.
 - Only the "simulated" conversation mode is implemented; replay and scripted modes, the self-iterating run mode, environment snapshots, and noise/trial handling are not built yet.
-- No real case study yet — treat this as an architecture being proposed, not a result being reported.
+- No polished case study published yet — treat this as an architecture being proposed.
+
+Where v2 and beyond are headed — agents drafting and operating experiments while humans keep the anchors — is laid out in `docs/design-v0.4.1.md`.
 
 ## Related Work
 

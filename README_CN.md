@@ -56,12 +56,14 @@ hdl compare 001              # 比较各版本
 
 ## 状态
 
-Pre-MVP。`init → run → score → compare` 整条管线能端到端跑通，但工具还没在真实 agent 上验证过，有几个已知缺口：
+**v1 —— 可信的手动 loop。** `init → run → score → compare` 整条管线能端到端跑通，跑前会拦下坏输入。`--llm`（真实模拟器 + LLM judge）在一个真实实验上跑过，不只是内置桩。已知缺口：
 
 - `depends_on`（用前一个 case 跑完的对话给后一个 case 当起始上下文）已解析、也会显示，但 `run` 还没用它。
 - `run` / `score` 默认走桩；真实打分要 `--llm` 和 API key。
 - 只实现了「模拟」对话模式；回放和固定模式、自迭代运行模式、环境快照、噪声/trial 处理，都还没做。
-- 还没有真实的 case study —— 把它当成一个被提出的架构，不是一个被报告的结果。
+- 还没有打磨成公开的 case study —— 当前把它当成一个被提出的架构。
+
+v2 及以后的方向（agent 起草、运行实验，人守住锚点）见 `docs/design-v0.4.1.md`。
 
 ## 相关工作
 
