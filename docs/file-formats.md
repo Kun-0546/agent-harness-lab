@@ -1,8 +1,8 @@
 # Harness Design Loop · 文件格式
 
 > 本文描述 hdl **v1 当前已实现**的文件格式 —— 工具实际读写的。配合架构文档 `design-v0.3.md` 看。
-> v2 规划的格式(brief.md、review.md、calibration/、authority matrix、provenance)见 `design-v0.4.1.md`,尚未实现、不在本文。
-> 日期:2026-05-17,随代码更新。各格式都对着 `src/harness_design_loop/` 的解析代码核过。
+> v2-minimal 已实现 brief.md、review.md、calibration/golden/ 的最小格式,见 `v2-minimal-spec.md`(§3 / §6 / §7);authority matrix、per-file provenance、calibration 校验闭环仍未实现,见 `design-v0.4.1.md`。
+> 日期:2026-05-19,随代码更新。各格式都对着 `src/harness_design_loop/` 的解析代码核过。
 
 ## 工作目录
 

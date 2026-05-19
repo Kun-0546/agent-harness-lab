@@ -27,6 +27,14 @@ class TestStubDesigner(unittest.TestCase):
         pkg = stub_designer(_brief(), "")
         self.assertIn("砍掉开场寒暄", pkg.program)
 
+    def test_respects_brief_compare(self):
+        # 填了「怎么比」→ stub 起草的 program 跟着走(线性迭代/对基线在 stub 里只此一处)
+        b = Brief(path=Path("brief.md"), optimize="x", change="y",
+                  care="z", redlines="w", compare="线性迭代")
+        self.assertIn("线性迭代", stub_designer(b, "").program)
+        # 没填(_brief() 不带 compare)→ 默认对基线
+        self.assertIn("对基线", stub_designer(_brief(), "").program)
+
 
 class TestDesignerDispatch(unittest.TestCase):
     def test_llm_without_env_raises(self):

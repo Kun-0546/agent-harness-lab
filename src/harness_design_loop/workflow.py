@@ -281,10 +281,31 @@ def _build_review(exp_name, brief, program, versions, cases, rubric) -> str:
     lines.append(f"- rubric:{dims or '(空)'}")
     lines.append(f"- 红线(来自 brief):{brief.redlines}")
     lines.append(f"- 测试集:{len(cases)} 个 case")
+    for c in cases:
+        first = c.opening.splitlines()[0] if c.opening.strip() else "(空)"
+        if len(first) > 50:
+            first = first[:50] + "…"
+        lines.append(f"  - {c.case_id}:{first}")
     lines.append("- 来源:program / versions / 测试集 / rubric / 模拟器 "
                  "都是 Designer 起草、待你确认。")
     lines += ["", "重点核 rubric 和红线 —— 它们是锚点;要改就直接改对应文件。"]
     return "\n".join(lines) + "\n"
+
+
+def _clear_drafted(exp_dir: Path) -> None:
+    """清掉上一轮 draft 起草的文件 —— 让 --force 重起草是干净的。
+
+    program / rubric / 模拟器 / review 直接删;versions/ 测试集/ 里清掉所有
+    .md(上一轮可能起草了 D-01..D-03,这轮只出 D-01,旧的留着会被 run 读进去)。
+    brief.md(人写的)和 results/(跑出来的)不动。
+    """
+    for name in ("program.md", "rubric.md", "模拟器.md", "review.md"):
+        (exp_dir / name).unlink(missing_ok=True)
+    for sub in ("versions", "测试集"):
+        sub_dir = exp_dir / sub
+        if sub_dir.is_dir():
+            for md in sub_dir.glob("*.md"):
+                md.unlink()
 
 
 def draft(exp_dir: Path, use_llm: bool) -> DraftResult:
@@ -309,6 +330,11 @@ def draft(exp_dir: Path, use_llm: bool) -> DraftResult:
         pkg = designer.design(brief, goal, use_llm)
     except designer.DesignerError as e:
         raise WorkflowError(str(e)) from e
+
+    # 落盘前清掉上一轮草案 —— 不然旧 case / 旧版本会残留、被 run 读进去。
+    # 首次起草没什么可清;--force 重起草时把上一轮清干净。
+    # 放在 design 成功之后:Designer 调模型失败时不动原有草案。
+    _clear_drafted(exp_dir)
 
     # 落盘
     (exp_dir / "测试集").mkdir(exist_ok=True)

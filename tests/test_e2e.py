@@ -170,7 +170,31 @@ class TestDraftEndToEnd(unittest.TestCase):
             self.assertEqual(cli.main(["compare", "001"]), 0)
         self.assertTrue((exp / "program.md").exists())
         self.assertTrue((exp / "review.md").exists())
+        # review.md 列出每个 case 的起始输入,不只写 case 数
+        self.assertIn("D-01", (exp / "review.md").read_text(encoding="utf-8"))
         self.assertTrue(list((exp / "results").glob("compare-*.md")))
+
+    def test_force_redraft_cleans_stale(self) -> None:
+        """--force 重起草前清掉上一轮残留的 case / version 文件。"""
+        original = Path.cwd()
+        os.chdir(self.root)
+        self.addCleanup(os.chdir, original)
+        exp = self.root / "experiments" / "001-demo"
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(cli.main(["draft", "demo"]), 0)
+            (exp / "brief.md").write_text(self.BRIEF, encoding="utf-8")
+            self.assertEqual(cli.main(["draft", "demo"]), 0)
+            # 塞两个上一轮残留的文件,模拟「这轮 Designer 不再生成它们」
+            (exp / "测试集" / "D-99.md").write_text(
+                "---\nid: D-99\n---\n## 起始输入\n陈年旧 case。\n", encoding="utf-8")
+            (exp / "versions" / "V9.md").write_text(
+                "---\nid: V9\n基线: 否\n---\n## 这是什么\n陈年旧版本。\n",
+                encoding="utf-8")
+            # --force 重起草:旧残留该被清掉
+            self.assertEqual(cli.main(["draft", "demo", "--force"]), 0)
+        self.assertFalse((exp / "测试集" / "D-99.md").exists())
+        self.assertFalse((exp / "versions" / "V9.md").exists())
+        self.assertTrue((exp / "测试集" / "D-01.md").exists())   # 新草案还在
 
 
 if __name__ == "__main__":

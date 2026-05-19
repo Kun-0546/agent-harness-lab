@@ -165,6 +165,11 @@ class TestBrief(_MdCase):
         b = parse_brief(self._md(self.BRIEF.replace("对基线", "")))
         self.assertEqual(b.validate(), [])
 
+    def test_validate_bad_compare(self):
+        # 「怎么比」填了识别不了的值 —— validate 要报问题
+        b = parse_brief(self._md(self.BRIEF.replace("对基线", "随便比比")))
+        self.assertTrue(any("怎么比" in p for p in b.validate()))
+
 
 if __name__ == "__main__":
     unittest.main()

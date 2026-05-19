@@ -56,7 +56,7 @@ def stub_designer(brief: Brief, goal: str) -> DraftPackage:
         "- 状态:重置\n"
         "- 评分:本地桩\n"
         "- 运行模式:人评\n"
-        "- 对比方式:对基线\n\n"
+        f"- 对比方式:{brief.compare_mode}\n\n"
         "## 留/丢规则\n人评模式,留空。\n\n"
         "## 喊人规则\n人评模式,留空。\n"
     )
@@ -117,11 +117,11 @@ def _call1_prompt(brief: Brief, goal: str) -> str:
         f"【总目标 goal】\n{goal or '(空)'}\n\n"
         f"【brief】\n想优化:{brief.optimize}\n要验证的改动:{brief.change}\n"
         f"最在意:{brief.care}\n不能牺牲(红线):{brief.redlines}\n"
-        f"怎么比:{brief.compare or '(没指定,你定:对基线 或 线性迭代)'}\n\n"
+        f"怎么比:{brief.compare_mode}\n\n"
         "program.md 严格照这个格式:\n"
         "# 实验 · program\n\n## 假设\n<这次想验证什么>\n\n"
         "## 声明\n- 环境:无\n- 对话模式:模拟\n- 状态:重置\n"
-        "- 评分:LLM Judge\n- 运行模式:人评\n- 对比方式:对基线\n\n"
+        f"- 评分:LLM Judge\n- 运行模式:人评\n- 对比方式:{brief.compare_mode}\n\n"
         "## 留/丢规则\n人评模式,留空。\n\n## 喊人规则\n人评模式,留空。\n\n"
         "只输出 program.md 的内容。"
     )
