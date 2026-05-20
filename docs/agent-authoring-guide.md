@@ -69,6 +69,15 @@ hdl score <name>      按 rubric 给最近一次 run 的对话打分。
 hdl compare <name>    把版本分数放一起比,出对比报告。
 ```
 
+## Cross-platform(跨平台)
+
+version-level connect 的 `## 配置 命令:` 是 shell 直接 exec 的命令。Python agent 解释器名跨平台不一样:
+
+- **Windows**:用 `py`(Python Launcher,Windows 自带)。例:`命令:py support_v1.py`。
+- **macOS / Linux**:用 `python3`。例:`命令:python3 support_v1.py`。
+
+跨机器 handoff 时记得改对应解释器,或者脚本加 shebang `#!/usr/bin/env python3` + `chmod +x`,然后 `命令:./support_v1.py` —— 三平台都吃。
+
 ## Provenance(来源)
 
 v2-minimal 用**集中式** provenance,统一写在 `review.md` 的「来源」段:

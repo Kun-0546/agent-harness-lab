@@ -40,6 +40,7 @@
 
 - 四种接入都已实现(见 examples/ 各一个样例)。外部命令行 = 子进程 + JSON 行:stdin 收 `{"input": ...}`,stdout 回 `{"response": ...}`。
 - agent 在 WSL 里,命令写 `wsl ...`。
+- **跨平台**:`命令:` 行是 shell 直接 exec 的命令。Python agent 解释器名 macOS / Linux 用 `python3`、Windows 用 `py`(Python Launcher);跨机器 handoff 时记得改对应解释器,或脚本加 shebang `#!/usr/bin/env python3` + `chmod +x` 再 `命令:./agent.py`(三平台都吃)。
 
 ---
 

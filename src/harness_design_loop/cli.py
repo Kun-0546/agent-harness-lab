@@ -380,7 +380,12 @@ def cmd_draft(args: argparse.Namespace) -> int:
 
 
 def cmd_review(args: argparse.Namespace) -> int:
-    """读实验里现有文件,出 review.md。宽松 —— 三态都不抛错。"""
+    """读实验里现有文件,出 review.md。
+
+    宽松 —— 不抛错。CLI summary 把四类信号都拉出来:
+    未起草 / 解析失败 / 未检查(依赖文件坏)/ 校验提醒(validate 问题)。
+    任一非空就不说「齐了」。
+    """
     exp_dir = _find_experiment(args.experiment)
     if exp_dir is None:
         print(f"找不到实验:{args.experiment}", file=sys.stderr)
@@ -395,7 +400,12 @@ def cmd_review(args: argparse.Namespace) -> int:
         print(f"  未起草:{'、'.join(result.missing)}")
     if result.broken:
         print(f"  解析失败:{'、'.join(result.broken)}")
-    if not result.missing and not result.broken:
+    if result.skipped:
+        print(f"  未检查(依赖文件有问题):{'、'.join(result.skipped)}")
+    if result.warnings:
+        print(f"  校验提醒:{len(result.warnings)} 处(详见 review.md);"
+              f"建议修完再跑 hdl run")
+    if not (result.missing or result.broken or result.skipped or result.warnings):
         print(f"  齐了 —— 没问题就 hdl run {args.experiment}")
     else:
         print(f"  让外层 coding agent 据 brief.md + docs/agent-authoring-guide.md "

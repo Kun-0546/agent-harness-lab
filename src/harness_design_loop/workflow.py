@@ -32,6 +32,33 @@ class WorkflowError(Exception):
     """编排跑不下去 —— 消息直接给用户看,cli 接住打到 stderr。"""
 
 
+def _load_json(path: Path):
+    """读 + 解 JSON —— IO / 编码 / JSON 异常由 _safe_call 翻译。"""
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _safe_call(label: str, fn, *args):
+    """把 parse / load 函数的 IO / 编码 / 解析异常统一翻成 WorkflowError。
+
+    解决 dogfood 暴露的 P0:run / score / compare 遇到 corrupt 文件直接吐
+    Python traceback —— cli.cmd_* 只 catch WorkflowError,parse_* 抛的
+    UnicodeDecodeError / JSONDecodeError 不被它们接住,会冒到 main 变 traceback。
+    在 workflow 层统一翻译,给用户看友好消息(如「program.md 读取失败:不是合法 UTF-8」)。
+    """
+    try:
+        return fn(*args)
+    except UnicodeDecodeError as e:
+        raise WorkflowError(
+            f"{label} 读取失败:不是合法 UTF-8(位置 {e.start})") from e
+    except FileNotFoundError:
+        raise WorkflowError(f"{label} 找不到") from None
+    except json.JSONDecodeError as e:
+        raise WorkflowError(
+            f"{label} JSON 解析失败:{e.msg}(行 {e.lineno} 列 {e.colno})") from e
+    except (ValueError, NotImplementedError) as e:
+        raise WorkflowError(f"{label} 解析失败:{e}") from e
+
+
 @dataclass
 class RunResult:
     """一次 run 的产出。"""
@@ -67,8 +94,10 @@ class ReviewResult:
     """一次 review 的产出。"""
 
     out_path: Path
-    missing: list[str]   # 未起草的产物名 —— 文件不存在
+    missing: list[str]   # 未起草的产物 —— 文件不存在
     broken: list[str]    # parse 失败的产物 —— 文件存在但读不出来,格式 "name(解析失败:msg)"
+    skipped: list[str]   # 未检查的产物 —— 自己没坏,但依赖的文件坏了(如 测试集 依赖 program 读对话模式)
+    warnings: list[str]  # validate() 校验提醒 —— brief 未填全、rubric 权重错、case 缺起始输入 等
 
 
 def baseline_problems(versions: list[Version], compare_mode: str) -> list[str]:
@@ -113,12 +142,9 @@ def run(exp_dir: Path, use_llm: bool) -> RunResult:
     program_path = exp_dir / "program.md"
     if not program_path.exists():
         raise WorkflowError(f"实验里没有 program.md:{exp_dir}")
-    program = parse_program(program_path)
-    try:
-        versions = load_versions(exp_dir)
-        cases = load_testset(exp_dir)
-    except (FileNotFoundError, NotImplementedError, ValueError) as e:
-        raise WorkflowError(str(e)) from e
+    program = _safe_call("program.md", parse_program, program_path)
+    versions = _safe_call("versions/", load_versions, exp_dir)
+    cases = _safe_call("测试集/", load_testset, exp_dir)
     if not versions or not cases:
         raise WorkflowError("versions/ 或 测试集/ 是空的,没法跑")
 
@@ -150,8 +176,9 @@ def run(exp_dir: Path, use_llm: bool) -> RunResult:
         sim_path = exp_dir / "模拟器.md"
         if not sim_path.exists():
             raise WorkflowError(f"--llm 要 模拟器.md,实验里没有:{exp_dir}")
+        parsed_sim = _safe_call("模拟器.md", parse_simulator, sim_path)
         try:
-            simulator = make_llm_simulator(parse_simulator(sim_path))
+            simulator = make_llm_simulator(parsed_sim)
         except RuntimeError as e:
             raise WorkflowError(str(e)) from e
         sim_name = "LLM 模拟器"
@@ -192,13 +219,13 @@ def score(exp_dir: Path, use_llm: bool) -> ScoreResult:
         raise WorkflowError("还没有 run 结果,先 hdl run")
     run_file = run_files[-1]
 
-    rubric = parse_rubric(rubric_path)
+    rubric = _safe_call("rubric.md", parse_rubric, rubric_path)
     rubric_problems = rubric.validate()
     if rubric_problems:
         raise WorkflowError(
             "rubric 有问题,先修(hdl rubric 可单独查):\n  - "
             + "\n  - ".join(rubric_problems))
-    runs = json.loads(run_file.read_text(encoding="utf-8"))
+    runs = _safe_call(f"results/{run_file.name}", _load_json, run_file)
 
     if use_llm:
         missing = [v for v in ("HDL_JUDGE_BASE_URL", "HDL_JUDGE_MODEL", "HDL_JUDGE_API_KEY")
@@ -245,17 +272,20 @@ def compare(exp_dir: Path) -> CompareResult:
     if not score_files:
         raise WorkflowError("还没有 score 结果,先 hdl score")
     score_file = score_files[-1]
-    data = json.loads(score_file.read_text(encoding="utf-8"))
+    data = _safe_call(f"results/{score_file.name}", _load_json, score_file)
     scores = data.get("scores", [])
     if not scores:
         raise WorkflowError("score 文件里没有分数")
 
-    try:
-        versions = load_versions(exp_dir)
-    except FileNotFoundError:
+    if (exp_dir / "versions").is_dir():
+        versions = _safe_call("versions/", load_versions, exp_dir)
+    else:
         versions = []
     program_path = exp_dir / "program.md"
-    mode = parse_program(program_path).compare_mode if program_path.exists() else "对基线"
+    if program_path.exists():
+        mode = _safe_call("program.md", parse_program, program_path).compare_mode
+    else:
+        mode = "对基线"
     bproblems = baseline_problems(versions, mode)
     if bproblems:
         raise WorkflowError("compare 跑不了:\n  - " + "\n  - ".join(bproblems))
@@ -304,10 +334,16 @@ def review(exp_dir: Path) -> ReviewResult:
     rubric = _piece(parse_rubric, exp_dir / "rubric.md")
     simulator = _piece(parse_simulator, exp_dir / "模拟器.md")
     versions = _dir_piece(load_versions)
-    cases = _dir_piece(load_testset)
+    # P1.a:测试集 依赖 program 的「对话模式」—— program 解析失败时不要 cascade
+    # 调 load_testset(那会让 测试集 也被误标「解析失败」),改成「未检查」单独 surface。
+    if program[1].startswith("解析失败"):
+        cases = ([], f"未检查:program.md {program[1]}")
+    else:
+        cases = _dir_piece(load_testset)
 
     missing: list[str] = []
     broken: list[str] = []
+    skipped: list[str] = []
     for name, (_obj, state) in (
         ("brief.md", brief), ("program.md", program),
         ("versions/", versions), ("测试集/", cases),
@@ -315,14 +351,33 @@ def review(exp_dir: Path) -> ReviewResult:
     ):
         if state == "未起草":
             missing.append(name)
+        elif state.startswith("未检查"):
+            skipped.append(f"{name}({state})")
         elif state != "ok":
             broken.append(f"{name}({state})")
+
+    # P1.b:收集 validate() 校验提醒 —— cli summary 用它判要不要说「齐了」。
+    # parse 成功才跑 validate;未起草 / 解析失败 / 未检查 的产物不再调 validate。
+    warnings: list[str] = []
+    for name, (obj, state) in (
+        ("brief.md", brief), ("program.md", program),
+        ("rubric.md", rubric), ("模拟器.md", simulator),
+    ):
+        if obj is not None and state == "ok":
+            warnings += [f"{name}:{p}" for p in obj.validate()]
+    if versions[1] == "ok":
+        for v in versions[0]:
+            warnings += [f"版本 {v.version_id}:{p}" for p in v.validate()]
+    if cases[1] == "ok":
+        for c in cases[0]:
+            warnings += [f"case {c.case_id}:{p}" for p in c.validate()]
 
     text = _build_review(exp_dir.name, brief, program, versions, cases,
                           rubric, simulator)
     out_path = exp_dir / "review.md"
     out_path.write_text(text, encoding="utf-8")
-    return ReviewResult(out_path=out_path, missing=missing, broken=broken)
+    return ReviewResult(out_path=out_path, missing=missing, broken=broken,
+                        skipped=skipped, warnings=warnings)
 
 
 def _build_review(exp_name, brief, program, versions, cases, rubric, simulator) -> str:
