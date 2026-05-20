@@ -52,7 +52,7 @@ hdl compare 001              # 比较各版本
 
 ## 命令
 
-`init` · `connect` · `new` · `show` · `cases` · `rubric` · `simulator` · `versions` · `run` · `score` · `compare`。细节跑 `hdl --help` 或 `hdl <命令> --help`。
+`init` · `connect` · `new` · `show` · `cases` · `rubric` · `simulator` · `versions` · `run` · `score` · `compare` · `draft`。细节跑 `hdl --help` 或 `hdl <命令> --help`。
 
 ## 状态
 
@@ -62,6 +62,8 @@ hdl compare 001              # 比较各版本
 - `run` / `score` 默认走桩；真实打分要 `--llm` 和 API key。
 - 只实现了「模拟」对话模式；回放和固定模式、自迭代运行模式、环境快照、噪声/trial 处理，都还没做。
 - 还没有打磨成公开的 case study —— 当前把它当成一个被提出的架构。
+
+在 `v2-agent-drafted-lab` 分支，`hdl draft` 提供最小 agent 起草流程：brief.md → 生成 program / versions / cases / rubric / simulator → review.md。实现切片见 `docs/v2-minimal-spec.md`。
 
 v2 及以后的方向（agent 起草、运行实验，人守住锚点）见 `docs/design-v0.4.1.md`。
 

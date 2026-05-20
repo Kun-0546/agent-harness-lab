@@ -52,7 +52,7 @@ By default `run` and `score` use built-in stubs (a canned simulator and a hash-b
 
 ## Commands
 
-`init` · `connect` · `new` · `show` · `cases` · `rubric` · `simulator` · `versions` · `run` · `score` · `compare`. Run `hdl --help` or `hdl <command> --help` for details.
+`init` · `connect` · `new` · `show` · `cases` · `rubric` · `simulator` · `versions` · `run` · `score` · `compare` · `draft`. Run `hdl --help` or `hdl <command> --help` for details.
 
 ## Status
 
@@ -62,6 +62,8 @@ By default `run` and `score` use built-in stubs (a canned simulator and a hash-b
 - `run` / `score` default to stubs; real scoring needs `--llm` and API keys.
 - Only the "simulated" conversation mode is implemented; replay and scripted modes, the self-iterating run mode, environment snapshots, and noise/trial handling are not built yet.
 - No polished case study published yet — treat this as an architecture being proposed.
+
+On the `v2-agent-drafted-lab` branch, `hdl draft` adds the minimal agent-drafted workflow: brief.md → generated program / versions / cases / rubric / simulator → review.md. See `docs/v2-minimal-spec.md` for the implementation slice.
 
 Where v2 and beyond are headed — agents drafting and operating experiments while humans keep the anchors — is laid out in `docs/design-v0.4.1.md`.
 

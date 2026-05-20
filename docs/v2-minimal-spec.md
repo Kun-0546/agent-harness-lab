@@ -97,7 +97,7 @@ Designer 只读 brief.md,不改它(brief.md 是 human_owned)。
 **契约**:
 
 - 输入:`brief.md`(解析后)、`goal.md`(原文)。
-- 输出:program.md、versions/、测试集/、rubric.md、模拟器.md —— 写进实验目录,各带 provenance 头。
+- 输出:program.md、versions/、测试集/、rubric.md、模拟器.md —— 写进实验目录;来源信息集中写入 review.md(§5)。
 - Designer 不碰 `goal.md`、`brief.md`、`connect.md`(都是人的)。
 - **失败硬退**:模型调用失败、或输出解析不出来 → 抛 WorkflowError;此时还没落盘,原有草案不动。落盘后没过 parser / validate 校验同样抛错;半成品留在原地,下次 `hdl draft --force` 重起草前会清掉。draft 失败即时回滚半成品留 v2.5。
 - 起草出的文件,要能过现有 parser(program / version / testset / rubric / simulator)和它们的 `validate()` —— prompt 里带格式要求;生成后 hdl 自己跑一遍 parser 校验,不过就当 Designer 失败。
