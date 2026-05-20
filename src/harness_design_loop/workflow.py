@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from harness_design_loop import report
+from harness_design_loop.brief import parse_brief
 from harness_design_loop.comparator import compare_scores
 from harness_design_loop.connect import parse_connect
 from harness_design_loop.grader import llm_grader, score_run, stub_grader
@@ -59,6 +60,14 @@ class CompareResult:
 
     report_text: str
     out_path: Path
+
+
+@dataclass
+class ReviewResult:
+    """一次 review 的产出。"""
+
+    out_path: Path
+    missing: list[str]   # 哪些产物没起草,便于 cli 提示外层 agent 下一步
 
 
 def baseline_problems(versions: list[Version], compare_mode: str) -> list[str]:
@@ -257,3 +266,127 @@ def compare(exp_dir: Path) -> CompareResult:
     out_path = results_dir / f"compare-{time.strftime('%Y%m%d-%H%M%S')}.md"
     out_path.write_text(report_text + "\n", encoding="utf-8")
     return CompareResult(report_text=report_text, out_path=out_path)
+
+
+def review(exp_dir: Path) -> ReviewResult:
+    """读实验里现有文件,出 review.md。
+
+    宽松 —— 缺什么就在对应行标「未起草」,不抛错。review 是 authoring loop
+    里的状态快照:外层 agent 边 author 边跑 review 看进度。硬关卡是 hdl run
+    的 preflight,不在这里。
+    """
+    if not exp_dir.exists():
+        raise WorkflowError(f"找不到实验:{exp_dir}")
+
+    def _try(parse, path: Path):
+        if not path.exists():
+            return None
+        try:
+            return parse(path)
+        except Exception:  # noqa: BLE001
+            return None
+
+    brief = _try(parse_brief, exp_dir / "brief.md")
+    program = _try(parse_program, exp_dir / "program.md")
+    rubric = _try(parse_rubric, exp_dir / "rubric.md")
+    simulator = _try(parse_simulator, exp_dir / "模拟器.md")
+    try:
+        versions = load_versions(exp_dir)
+    except (FileNotFoundError, NotImplementedError, ValueError):
+        versions = []
+    try:
+        cases = load_testset(exp_dir)
+    except (FileNotFoundError, NotImplementedError, ValueError):
+        cases = []
+
+    missing: list[str] = []
+    if brief is None:
+        missing.append("brief.md")
+    if program is None:
+        missing.append("program.md")
+    if not versions:
+        missing.append("versions/")
+    if not cases:
+        missing.append("测试集/")
+    if rubric is None:
+        missing.append("rubric.md")
+    if simulator is None:
+        missing.append("模拟器.md")
+
+    text = _build_review(exp_dir.name, brief, program, versions, cases,
+                          rubric, simulator)
+    out_path = exp_dir / "review.md"
+    out_path.write_text(text, encoding="utf-8")
+    return ReviewResult(out_path=out_path, missing=missing)
+
+
+def _build_review(exp_name, brief, program, versions, cases, rubric, simulator) -> str:
+    """拼 review.md —— 人审入口,外层 agent 起草的实验一页看完。
+
+    任何一块没起草 / 解析失败 → 对应行标「未起草」,不抛错。
+    """
+    lines = [f"# review — {exp_name}", ""]
+
+    if program is None:
+        lines.append("- 实验目标:**program.md 未起草**")
+    elif program.assumption:
+        lines.append(f"- 实验目标:{program.assumption}")
+    else:
+        lines.append("- 实验目标:(program.md 的「假设」段为空)")
+
+    if versions:
+        for v in versions:
+            tag = "(基线)" if v.is_baseline else ""
+            what = v.what.splitlines()[0] if v.what.strip() else "(空)"
+            lines.append(f"- {v.version_id}{tag}:{what}")
+    else:
+        lines.append("- 版本:**versions/ 未起草**")
+
+    if rubric is None:
+        lines.append("- rubric:**rubric.md 未起草**")
+    else:
+        dims = "、".join(f"{d.name} {d.weight:g}" for d in rubric.dimensions
+                         if d.weight is not None)
+        lines.append(f"- rubric:{dims or '(无有效维度)'}")
+
+    if brief is None:
+        lines.append("- 红线(brief):**brief.md 未起草**")
+    elif brief.redlines:
+        lines.append(f"- 红线(brief):{brief.redlines}")
+    else:
+        lines.append("- 红线(brief):(brief.md 没填)")
+
+    if cases:
+        lines.append(f"- 测试集:{len(cases)} 个 case")
+        for c in cases:
+            first = c.opening.splitlines()[0] if c.opening.strip() else "(空)"
+            if len(first) > 50:
+                first = first[:50] + "…"
+            lines.append(f"  - {c.case_id}:{first}")
+    else:
+        lines.append("- 测试集:**测试集/ 未起草**")
+
+    if simulator is None:
+        lines.append("- 模拟器:**模拟器.md 未起草**")
+    else:
+        persona = simulator.persona.splitlines()[0] if simulator.persona.strip() else "(空)"
+        if len(persona) > 50:
+            persona = persona[:50] + "…"
+        lines.append(f"- 模拟器人设:{persona}")
+
+    # 来源 —— v2-minimal 用集中式 provenance(per-file frontmatter 留 v2.5)
+    def _src(obj_or_seq) -> str:
+        return "external_agent_drafted" if obj_or_seq else "未起草"
+
+    lines += ["", "## 来源",
+              "- brief.md:human",
+              f"- program.md:{_src(program)}",
+              f"- versions/:{_src(versions)}",
+              f"- 测试集/:{_src(cases)}",
+              f"- rubric.md:{_src(rubric)}",
+              f"- 模拟器.md:{_src(simulator)}"]
+
+    lines += ["",
+              "重点核 rubric 和红线 —— 它们是锚点;要改就直接改对应文件,"
+              "再跑 hdl review。"]
+    return "\n".join(lines) + "\n"

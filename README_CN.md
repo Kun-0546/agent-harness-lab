@@ -52,7 +52,7 @@ hdl compare 001              # 比较各版本
 
 ## 命令
 
-`init` · `connect` · `new` · `show` · `cases` · `rubric` · `simulator` · `versions` · `run` · `score` · `compare` · `draft`。细节跑 `hdl --help` 或 `hdl <命令> --help`。
+`init` · `connect` · `new` · `show` · `cases` · `rubric` · `simulator` · `versions` · `run` · `score` · `compare` · `draft` · `review`。细节跑 `hdl --help` 或 `hdl <命令> --help`。
 
 ## 状态
 
@@ -63,7 +63,7 @@ hdl compare 001              # 比较各版本
 - 只实现了「模拟」对话模式；回放和固定模式、自迭代运行模式、环境快照、噪声/trial 处理，都还没做。
 - 还没有打磨成公开的 case study —— 当前把它当成一个被提出的架构。
 
-在 `v2-agent-drafted-lab` 分支，`hdl draft` 提供最小 agent 起草流程：brief.md → 生成 program / versions / cases / rubric / simulator → review.md。实现切片见 `docs/v2-minimal-spec.md`。
+在 `v2-agent-drafted-lab` 分支，`hdl draft` 为**外层 coding agent**（Claude Code / Cursor / Codex）开一个 scaffolded authoring workspace —— agent 据 `brief.md` 起草 `program.md` / `versions/` / `测试集/` / `rubric.md` / `模拟器.md`；HDL 自己**不调模型**起草。`hdl review` 再出可审的 `review.md`（宽松：缺什么标「未起草」）。实现切片见 `docs/v2-minimal-spec.md`，agent 起草指南见 `docs/agent-authoring-guide.md`。
 
 v2 及以后的方向（agent 起草、运行实验，人守住锚点）见 `docs/design-v0.4.1.md`。
 

@@ -364,14 +364,36 @@ def cmd_draft(args: argparse.Namespace) -> int:
     print(f"    测试集/        —— 外层 agent 在此放 case 文件")
     print()
     if (exp_dir / "program.md").exists():
-        print(f"  program.md 已起草 —— 下一步:hdl run {args.name}")
+        print(f"  program.md 已起草 —— 下一步:hdl review {args.name}")
     else:
         print("  下一步:")
         print(f"    1. 填好 brief.md(human-owned,外层 agent 不要改它)")
         print(f"    2. 让外层 coding agent(Claude Code / Cursor / Codex)据 brief.md 起草:")
         print(f"       program.md、versions/V*.md、测试集/D*.md、rubric.md、模拟器.md")
-        print(f"       格式见 docs/file-formats.md + docs/v2-minimal-spec.md")
-        print(f"    3. 跑 hdl run {args.name}(preflight 会校验产物)")
+        print(f"       agent 读 docs/agent-authoring-guide.md;格式以 docs/file-formats.md 为准")
+        print(f"    3. 跑 hdl review {args.name}  —— 出 review.md(可多次跑,缺什么标未起草)")
+        print(f"    4. 通过后:hdl run {args.name}")
+    return 0
+
+
+def cmd_review(args: argparse.Namespace) -> int:
+    """读实验里现有文件,出 review.md。宽松 —— 缺什么标「未起草」,不抛错。"""
+    exp_dir = _find_experiment(args.experiment)
+    if exp_dir is None:
+        print(f"找不到实验:{args.experiment}", file=sys.stderr)
+        return 1
+    try:
+        result = workflow.review(exp_dir)
+    except workflow.WorkflowError as e:
+        print(str(e), file=sys.stderr)
+        return 1
+    print(f"review:{result.out_path}")
+    if result.missing:
+        print(f"  未起草:{'、'.join(result.missing)}")
+        print(f"  让外层 coding agent 据 brief.md + docs/agent-authoring-guide.md 起草,"
+              f"再跑 hdl review {args.experiment}")
+    else:
+        print(f"  齐了 —— 没问题就 hdl run {args.experiment}")
     return 0
 
 
@@ -462,6 +484,11 @@ def build_parser() -> argparse.ArgumentParser:
                               help="为外层 coding agent 开一个 authoring workspace(V2):建实验目录 + brief.md")
     p_draft.add_argument("name", help="实验名;建成 experiments/<编号-名字>/")
     p_draft.set_defaults(func=cmd_draft)
+
+    p_review = sub.add_parser("review",
+                               help="读实验里现有文件出 review.md(宽松,缺什么标未起草;V2)")
+    p_review.add_argument("experiment", help="实验编号或名字")
+    p_review.set_defaults(func=cmd_review)
 
     return parser
 
