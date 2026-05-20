@@ -335,33 +335,43 @@ def cmd_compare(args: argparse.Namespace) -> int:
 
 
 def cmd_draft(args: argparse.Namespace) -> int:
+    """V2 入口:为外层 coding agent 开一个 authoring workspace。
+
+    HDL 不调模型起草实验 —— 那是外层 coding agent(Claude Code / Cursor /
+    Codex)的活,据 brief.md 起草 program / versions / 测试集 / rubric /
+    模拟器,完了走 hdl run / score / compare。HDL 这里只 scaffold:建实验
+    目录、brief.md 模板、空的 versions/ 和 测试集/。幂等可重跑。
+    """
     exp_dir = _find_experiment(args.name)
     if exp_dir is None:
-        # 首阶段:还没这个实验 —— 建目录 + brief.md 模板
         exp_name = f"{_next_number()}-{args.name}"
         exp_dir = _experiments_dir() / exp_name
         exp_dir.mkdir(parents=True)
-        (exp_dir / "brief.md").write_text(
+    else:
+        exp_name = exp_dir.name
+    brief_path = exp_dir / "brief.md"
+    new_brief = not brief_path.exists()
+    if new_brief:
+        brief_path.write_text(
             templates.BRIEF_TEMPLATE.replace("{name}", exp_name), encoding="utf-8")
-        (exp_dir / "测试集").mkdir()
-        (exp_dir / "versions").mkdir()
-        print(f"建好实验:{exp_name}")
-        print(f"  brief:{exp_dir / 'brief.md'}")
-        print(f"  下一步:填好 brief.md,再跑 hdl draft {args.name}")
-        return 0
-    # 次阶段:实验在了 —— 让 Designer 起草
-    if (exp_dir / "program.md").exists() and not args.force:
-        print(f"实验已起草过(有 program.md);要重起草加 --force:{exp_dir.name}",
-              file=sys.stderr)
-        return 1
-    try:
-        result = workflow.draft(exp_dir, args.llm)
-    except workflow.WorkflowError as e:
-        print(str(e), file=sys.stderr)
-        return 1
-    print(f"草案生成:{exp_dir.name}  ({len(result.files)} 个文件)")
-    print(f"  审:{result.review_path}")
-    print(f"  没问题就 hdl run {exp_dir.name}")
+    (exp_dir / "测试集").mkdir(exist_ok=True)
+    (exp_dir / "versions").mkdir(exist_ok=True)
+
+    print(f"实验:{exp_name}")
+    print(f"  {exp_dir}")
+    print(f"    brief.md       —— 人写的实验意图({'已建模板,去填' if new_brief else '已在'})")
+    print(f"    versions/      —— 外层 agent 在此放版本文件")
+    print(f"    测试集/        —— 外层 agent 在此放 case 文件")
+    print()
+    if (exp_dir / "program.md").exists():
+        print(f"  program.md 已起草 —— 下一步:hdl run {args.name}")
+    else:
+        print("  下一步:")
+        print(f"    1. 填好 brief.md(human-owned,外层 agent 不要改它)")
+        print(f"    2. 让外层 coding agent(Claude Code / Cursor / Codex)据 brief.md 起草:")
+        print(f"       program.md、versions/V*.md、测试集/D*.md、rubric.md、模拟器.md")
+        print(f"       格式见 docs/file-formats.md + docs/v2-minimal-spec.md")
+        print(f"    3. 跑 hdl run {args.name}(preflight 会校验产物)")
     return 0
 
 
@@ -448,12 +458,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_compare.add_argument("experiment", help="实验编号或名字")
     p_compare.set_defaults(func=cmd_compare)
 
-    p_draft = sub.add_parser("draft", help="据 brief.md 让 Designer 起草整套实验(V2)")
-    p_draft.add_argument("name", help="实验名;首次建 brief.md,填好后再跑一次起草")
-    p_draft.add_argument("--llm", action="store_true",
-                         help="用真 Designer 起草(先设 HDL_DESIGNER_* 环境变量);默认本地桩")
-    p_draft.add_argument("--force", action="store_true",
-                         help="实验已起草过,覆盖重起草")
+    p_draft = sub.add_parser("draft",
+                              help="为外层 coding agent 开一个 authoring workspace(V2):建实验目录 + brief.md")
+    p_draft.add_argument("name", help="实验名;建成 experiments/<编号-名字>/")
     p_draft.set_defaults(func=cmd_draft)
 
     return parser
