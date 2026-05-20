@@ -58,7 +58,10 @@ def cmd_init(args: argparse.Namespace) -> int:
     print(f"初始化:{root}")
     for c in created:
         print(f"  + {c}")
-    print("  下一步:填 connect.md、goal.md;hdl new <实验名> 开第一个实验。")
+    print("  下一步:")
+    print("    1. 填 connect.md、goal.md")
+    print("    2. 开实验:hdl new <名字>(v1 人手写)或 hdl draft <名字>(v2,外层 agent 起草)")
+    print("    3. calibration/golden/ 放 golden case(对话 + 人判定;本期是约定,v2.5 用它校 judge)")
     return 0
 
 
@@ -377,7 +380,7 @@ def cmd_draft(args: argparse.Namespace) -> int:
 
 
 def cmd_review(args: argparse.Namespace) -> int:
-    """读实验里现有文件,出 review.md。宽松 —— 缺什么标「未起草」,不抛错。"""
+    """读实验里现有文件,出 review.md。宽松 —— 三态都不抛错。"""
     exp_dir = _find_experiment(args.experiment)
     if exp_dir is None:
         print(f"找不到实验:{args.experiment}", file=sys.stderr)
@@ -390,10 +393,13 @@ def cmd_review(args: argparse.Namespace) -> int:
     print(f"review:{result.out_path}")
     if result.missing:
         print(f"  未起草:{'、'.join(result.missing)}")
-        print(f"  让外层 coding agent 据 brief.md + docs/agent-authoring-guide.md 起草,"
-              f"再跑 hdl review {args.experiment}")
-    else:
+    if result.broken:
+        print(f"  解析失败:{'、'.join(result.broken)}")
+    if not result.missing and not result.broken:
         print(f"  齐了 —— 没问题就 hdl run {args.experiment}")
+    else:
+        print(f"  让外层 coding agent 据 brief.md + docs/agent-authoring-guide.md "
+              f"起草 / 修正,再跑 hdl review {args.experiment}")
     return 0
 
 

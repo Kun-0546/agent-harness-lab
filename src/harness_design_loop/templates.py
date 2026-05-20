@@ -62,7 +62,9 @@ SIMULATOR_TEMPLATE = """# 模拟器 —— 模拟模式下扮用户的那个 age
 
 BRIEF_TEMPLATE = """# brief — {name}
 
-> 人写的实验意图(V2)。填好后跑 hdl draft <实验名>,Designer 据此起草整套实验。
+> 人写的实验意图(V2)。填好后让外层 coding agent(Claude Code / Cursor / Codex)
+> 据它起草 program / versions / 测试集 / rubric / 模拟器,完了跑 hdl review。
+> HDL 自己不调模型起草。
 
 ## 想优化什么
 <这个 agent,你想让它哪方面变好>

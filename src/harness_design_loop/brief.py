@@ -1,7 +1,7 @@
 """读一个实验的 brief.md —— 人写的自然语言实验意图(v2)。
 
-brief 是 V2 的入口:人写它,Designer Agent 据此起草 program 等执行文件。
-格式见 docs/v2-minimal-spec.md §3。
+brief 是 V2 的入口:人写它,外层 coding agent(Claude Code / Cursor / Codex 等)
+据它起草 program 等执行文件。HDL 自己不调模型起草。格式见 docs/v2-minimal-spec.md §3。
 """
 from __future__ import annotations
 
@@ -27,8 +27,8 @@ class Brief:
     def compare_mode(self) -> str:
         """怎么比;空值、占位符、非法值一律落「对基线」。
 
-        跟 program.Program.compare_mode 同构 —— Designer 据此定 program 的
-        「对比方式」声明。非法值另由 validate() 报问题。
+        跟 program.Program.compare_mode 同构 —— 外层 agent 据此定 program
+        的「对比方式」声明。非法值另由 validate() 报问题。
         """
         return (self.compare if mdutil.is_filled(self.compare)
                 and self.compare in COMPARE_MODES else "对基线")
@@ -36,7 +36,7 @@ class Brief:
     def validate(self) -> list[str]:
         """返回问题清单;空清单表示没问题。
 
-        前四段是 Designer 起草实验的依据,必须填;「怎么比」可空,
+        前四段是外层 agent 起草实验的依据,必须填;「怎么比」可空,
         填了就得是 对基线 / 线性迭代。
         """
         problems: list[str] = []

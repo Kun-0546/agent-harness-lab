@@ -67,7 +67,8 @@ class ReviewResult:
     """一次 review 的产出。"""
 
     out_path: Path
-    missing: list[str]   # 哪些产物没起草,便于 cli 提示外层 agent 下一步
+    missing: list[str]   # 未起草的产物名 —— 文件不存在
+    broken: list[str]    # parse 失败的产物 —— 文件存在但读不出来,格式 "name(解析失败:msg)"
 
 
 def baseline_problems(versions: list[Version], compare_mode: str) -> list[str]:
@@ -271,120 +272,168 @@ def compare(exp_dir: Path) -> CompareResult:
 def review(exp_dir: Path) -> ReviewResult:
     """读实验里现有文件,出 review.md。
 
-    宽松 —— 缺什么就在对应行标「未起草」,不抛错。review 是 authoring loop
-    里的状态快照:外层 agent 边 author 边跑 review 看进度。硬关卡是 hdl run
-    的 preflight,不在这里。
+    宽松 —— 三态:文件不存在 = 未起草、parse 失败 = 解析失败:<msg>、
+    parse 通过 = ok(ok 后再跑 validate(),问题作为「校验提醒」内联展示)。
+    不抛错。review 是 authoring loop 里的状态快照,外层 agent 边 author
+    边跑 review 看进度。硬关卡是 hdl run 的 preflight,不在这里。
     """
     if not exp_dir.exists():
         raise WorkflowError(f"找不到实验:{exp_dir}")
 
-    def _try(parse, path: Path):
+    def _piece(parse, path: Path) -> tuple:
+        """返回 (object_or_None, status):ok / 未起草 / 解析失败:<msg>。"""
         if not path.exists():
-            return None
+            return None, "未起草"
         try:
-            return parse(path)
-        except Exception:  # noqa: BLE001
-            return None
+            return parse(path), "ok"
+        except Exception as e:  # noqa: BLE001
+            return None, f"解析失败:{e!s}"
 
-    brief = _try(parse_brief, exp_dir / "brief.md")
-    program = _try(parse_program, exp_dir / "program.md")
-    rubric = _try(parse_rubric, exp_dir / "rubric.md")
-    simulator = _try(parse_simulator, exp_dir / "模拟器.md")
-    try:
-        versions = load_versions(exp_dir)
-    except (FileNotFoundError, NotImplementedError, ValueError):
-        versions = []
-    try:
-        cases = load_testset(exp_dir)
-    except (FileNotFoundError, NotImplementedError, ValueError):
-        cases = []
+    def _dir_piece(loader) -> tuple:
+        """versions/ 和 测试集/ —— 目录粒度,整体一个 status。"""
+        try:
+            items = loader(exp_dir)
+            return items, ("ok" if items else "未起草")
+        except FileNotFoundError:
+            return [], "未起草"
+        except (NotImplementedError, ValueError) as e:
+            return [], f"解析失败:{e!s}"
+
+    brief = _piece(parse_brief, exp_dir / "brief.md")
+    program = _piece(parse_program, exp_dir / "program.md")
+    rubric = _piece(parse_rubric, exp_dir / "rubric.md")
+    simulator = _piece(parse_simulator, exp_dir / "模拟器.md")
+    versions = _dir_piece(load_versions)
+    cases = _dir_piece(load_testset)
 
     missing: list[str] = []
-    if brief is None:
-        missing.append("brief.md")
-    if program is None:
-        missing.append("program.md")
-    if not versions:
-        missing.append("versions/")
-    if not cases:
-        missing.append("测试集/")
-    if rubric is None:
-        missing.append("rubric.md")
-    if simulator is None:
-        missing.append("模拟器.md")
+    broken: list[str] = []
+    for name, (_obj, state) in (
+        ("brief.md", brief), ("program.md", program),
+        ("versions/", versions), ("测试集/", cases),
+        ("rubric.md", rubric), ("模拟器.md", simulator),
+    ):
+        if state == "未起草":
+            missing.append(name)
+        elif state != "ok":
+            broken.append(f"{name}({state})")
 
     text = _build_review(exp_dir.name, brief, program, versions, cases,
                           rubric, simulator)
     out_path = exp_dir / "review.md"
     out_path.write_text(text, encoding="utf-8")
-    return ReviewResult(out_path=out_path, missing=missing)
+    return ReviewResult(out_path=out_path, missing=missing, broken=broken)
 
 
 def _build_review(exp_name, brief, program, versions, cases, rubric, simulator) -> str:
     """拼 review.md —— 人审入口,外层 agent 起草的实验一页看完。
 
-    任何一块没起草 / 解析失败 → 对应行标「未起草」,不抛错。
+    每条产物三态:ok / 未起草 / 解析失败:<msg>。ok 时再跑 validate(),
+    校验问题作为「⚠ 校验」内联展示。参数都是 (obj, state) 元组。
     """
     lines = [f"# review — {exp_name}", ""]
 
-    if program is None:
+    # 实验目标(来自 program 假设)
+    p_obj, p_state = program
+    if p_state == "未起草":
         lines.append("- 实验目标:**program.md 未起草**")
-    elif program.assumption:
-        lines.append(f"- 实验目标:{program.assumption}")
+    elif p_state != "ok":
+        lines.append(f"- 实验目标:**program.md {p_state}**")
     else:
-        lines.append("- 实验目标:(program.md 的「假设」段为空)")
+        problems = p_obj.validate()
+        warn = f"  ⚠ 校验:{'、'.join(problems)}" if problems else ""
+        if p_obj.assumption:
+            lines.append(f"- 实验目标:{p_obj.assumption}{warn}")
+        else:
+            lines.append(f"- 实验目标:(program.md 的「假设」段为空){warn}")
 
-    if versions:
-        for v in versions:
+    # 版本
+    v_list, v_state = versions
+    if v_state == "未起草":
+        lines.append("- 版本:**versions/ 未起草**")
+    elif v_state != "ok":
+        lines.append(f"- 版本:**versions/ {v_state}**")
+    else:
+        for v in v_list:
             tag = "(基线)" if v.is_baseline else ""
             what = v.what.splitlines()[0] if v.what.strip() else "(空)"
-            lines.append(f"- {v.version_id}{tag}:{what}")
-    else:
-        lines.append("- 版本:**versions/ 未起草**")
+            problems = v.validate()
+            warn = f"  ⚠ {'、'.join(problems)}" if problems else ""
+            lines.append(f"- {v.version_id}{tag}:{what}{warn}")
 
-    if rubric is None:
+    # rubric
+    r_obj, r_state = rubric
+    if r_state == "未起草":
         lines.append("- rubric:**rubric.md 未起草**")
+    elif r_state != "ok":
+        lines.append(f"- rubric:**rubric.md {r_state}**")
     else:
-        dims = "、".join(f"{d.name} {d.weight:g}" for d in rubric.dimensions
+        dims = "、".join(f"{d.name} {d.weight:g}" for d in r_obj.dimensions
                          if d.weight is not None)
-        lines.append(f"- rubric:{dims or '(无有效维度)'}")
+        problems = r_obj.validate()
+        warn = f"  ⚠ 校验:{'、'.join(problems)}" if problems else ""
+        lines.append(f"- rubric:{dims or '(无有效维度)'}{warn}")
 
-    if brief is None:
+    # 红线(brief)—— brief.validate() 会识别占位符 / 必填段没填
+    b_obj, b_state = brief
+    if b_state == "未起草":
         lines.append("- 红线(brief):**brief.md 未起草**")
-    elif brief.redlines:
-        lines.append(f"- 红线(brief):{brief.redlines}")
+    elif b_state != "ok":
+        lines.append(f"- 红线(brief):**brief.md {b_state}**")
     else:
-        lines.append("- 红线(brief):(brief.md 没填)")
+        problems = b_obj.validate()
+        if problems:
+            # 必填段没填、或仍是模板占位符 —— 不能把它当真红线 echo 出来
+            lines.append(
+                f"- 红线(brief):**brief.md 未填写完整:{'、'.join(problems)}**")
+        elif b_obj.redlines:
+            lines.append(f"- 红线(brief):{b_obj.redlines}")
+        else:
+            lines.append("- 红线(brief):(空)")
 
-    if cases:
-        lines.append(f"- 测试集:{len(cases)} 个 case")
-        for c in cases:
+    # 测试集
+    c_list, c_state = cases
+    if c_state == "未起草":
+        lines.append("- 测试集:**测试集/ 未起草**")
+    elif c_state != "ok":
+        lines.append(f"- 测试集:**测试集/ {c_state}**")
+    else:
+        lines.append(f"- 测试集:{len(c_list)} 个 case")
+        for c in c_list:
             first = c.opening.splitlines()[0] if c.opening.strip() else "(空)"
             if len(first) > 50:
                 first = first[:50] + "…"
-            lines.append(f"  - {c.case_id}:{first}")
-    else:
-        lines.append("- 测试集:**测试集/ 未起草**")
+            problems = c.validate()
+            warn = f"  ⚠ {'、'.join(problems)}" if problems else ""
+            lines.append(f"  - {c.case_id}:{first}{warn}")
 
-    if simulator is None:
+    # 模拟器
+    s_obj, s_state = simulator
+    if s_state == "未起草":
         lines.append("- 模拟器:**模拟器.md 未起草**")
+    elif s_state != "ok":
+        lines.append(f"- 模拟器:**模拟器.md {s_state}**")
     else:
-        persona = simulator.persona.splitlines()[0] if simulator.persona.strip() else "(空)"
+        persona = s_obj.persona.splitlines()[0] if s_obj.persona.strip() else "(空)"
         if len(persona) > 50:
             persona = persona[:50] + "…"
-        lines.append(f"- 模拟器人设:{persona}")
+        problems = s_obj.validate()
+        warn = f"  ⚠ 校验:{'、'.join(problems)}" if problems else ""
+        lines.append(f"- 模拟器人设:{persona}{warn}")
 
     # 来源 —— v2-minimal 用集中式 provenance(per-file frontmatter 留 v2.5)
-    def _src(obj_or_seq) -> str:
-        return "external_agent_drafted" if obj_or_seq else "未起草"
+    def _src(state: str, human_owned: bool = False) -> str:
+        if state == "ok":
+            return "human" if human_owned else "external_agent_drafted"
+        return state  # 未起草 / 解析失败:<msg>
 
     lines += ["", "## 来源",
-              "- brief.md:human",
-              f"- program.md:{_src(program)}",
-              f"- versions/:{_src(versions)}",
-              f"- 测试集/:{_src(cases)}",
-              f"- rubric.md:{_src(rubric)}",
-              f"- 模拟器.md:{_src(simulator)}"]
+              f"- brief.md:{_src(brief[1], human_owned=True)}",
+              f"- program.md:{_src(program[1])}",
+              f"- versions/:{_src(versions[1])}",
+              f"- 测试集/:{_src(cases[1])}",
+              f"- rubric.md:{_src(rubric[1])}",
+              f"- 模拟器.md:{_src(simulator[1])}"]
 
     lines += ["",
               "重点核 rubric 和红线 —— 它们是锚点;要改就直接改对应文件,"

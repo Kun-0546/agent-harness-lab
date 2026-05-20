@@ -5,6 +5,8 @@
 > 取代 v0.4 草稿。v0.3 的 §0–§5、§7(接入、评测、文件格式骨架)仍有效。
 > 日期:2026-05-18。这是执行方案,不是实现 —— 仍不写代码。
 
+> **当前实现状态(2026-05-19 更新)**:v2-minimal 已把本文里的 "Designer Agent" 这条收束为 **external coding agent authored workflow** —— HDL 不内置 Designer LLM,起草是外层 coding agent(Claude Code / Cursor / Codex)的活。代码层面以 `v2-minimal-spec.md` 为准;本文是长期产品架构,保留 Designer Agent 的概念词供后续 v2.5 / v3 / v4 阶段使用。
+
 ---
 
 ## 1. 原则(承自 v0.4,不变)
