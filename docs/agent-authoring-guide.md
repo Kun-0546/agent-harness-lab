@@ -55,9 +55,9 @@
 ## Commands(命令)
 
 ```
-hdl draft <name>      用户跑 —— 为你开一个 authoring workspace。
-                      建实验目录 + brief.md 模板 + 空 versions/ 和 测试集/。
-                      你这个外层 agent 不调这个命令,用户调。
+hdl draft <name>      用户或外层 agent 运行 —— 开一个 authoring workspace。
+                      建实验目录 + brief.md 模板 + 空 versions/ 和 测试集/(scaffold-only)。
+                      如果 workspace 还不存在,先运行它;已存在则读 brief.md 接着起草。
 
 (你 author program / versions / 测试集 / rubric / 模拟器 ……)
 
