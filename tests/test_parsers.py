@@ -1,14 +1,14 @@
-"""文件解析器的单测 —— program / rubric / version / connect / 测试集 / brief。"""
+"""文件解析器的单测 —— program / rubric / version / connect / cases / brief。"""
 import tempfile
 import unittest
 from pathlib import Path
 
-from harness_design_loop.brief import parse_brief
-from harness_design_loop.connect import parse_connect
-from harness_design_loop.program import parse_program
-from harness_design_loop.rubric import parse_rubric
-from harness_design_loop.testset import parse_sim_case
-from harness_design_loop.version import parse_version
+from agent_harness_lab.brief import parse_brief
+from agent_harness_lab.connect import parse_connect
+from agent_harness_lab.program import parse_program
+from agent_harness_lab.rubric import parse_rubric
+from agent_harness_lab.testset import parse_sim_case
+from agent_harness_lab.version import parse_version
 
 
 class _MdCase(unittest.TestCase):
@@ -63,7 +63,7 @@ class TestProgram(_MdCase):
             "- 对比方式:<对基线 / 线性迭代;多版本怎么比,默认 对基线、可不写>\n"))
         # compare 必须拿到合法值 —— 占位符不能进对比报告
         self.assertEqual(prog.compare_mode, "对基线")
-        # 但 validate(hdl show 用)要把这行报成问题
+        # 但 validate(ahl show 用)要把这行报成问题
         self.assertTrue(any("对比方式" in p for p in prog.validate()))
 
 

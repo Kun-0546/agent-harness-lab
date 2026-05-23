@@ -9,10 +9,10 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from harness_design_loop.agentconn import open_session
-from harness_design_loop.connect import Connect
-from harness_design_loop.testset import TestCase
-from harness_design_loop.version import Version
+from agent_harness_lab.agentconn import open_session
+from agent_harness_lab.connect import Connect
+from agent_harness_lab.testset import TestCase
+from agent_harness_lab.version import Version
 
 # 模拟器:看着 transcript,出下一句用户话,或 None 收尾。
 Simulator = Callable[[list], "str | None"]

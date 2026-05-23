@@ -11,21 +11,21 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from harness_design_loop import report
-from harness_design_loop.brief import parse_brief
-from harness_design_loop.comparator import compare_scores
-from harness_design_loop.connect import parse_connect
-from harness_design_loop.grader import llm_grader, score_run, stub_grader
-from harness_design_loop.program import Program, parse_program
-from harness_design_loop.rubric import parse_rubric
-from harness_design_loop.runner import run_experiment
-from harness_design_loop.simulator import (
+from agent_harness_lab import report
+from agent_harness_lab.brief import parse_brief
+from agent_harness_lab.comparator import compare_scores
+from agent_harness_lab.connect import parse_connect
+from agent_harness_lab.grader import llm_grader, score_run, stub_grader
+from agent_harness_lab.program import Program, parse_program
+from agent_harness_lab.rubric import parse_rubric
+from agent_harness_lab.runner import run_experiment
+from agent_harness_lab.simulator import (
     make_llm_simulator,
     parse_simulator,
     stub_simulator,
 )
-from harness_design_loop.testset import TestCase, load_testset
-from harness_design_loop.version import Version, load_versions
+from agent_harness_lab.testset import TestCase, load_testset
+from agent_harness_lab.version import Version, load_versions
 
 
 class WorkflowError(Exception):
@@ -50,7 +50,12 @@ def _safe_call(label: str, fn, *args):
     except UnicodeDecodeError as e:
         raise WorkflowError(
             f"{label} 读取失败:不是合法 UTF-8(位置 {e.start})") from e
-    except FileNotFoundError:
+    except FileNotFoundError as e:
+        # legacy detection(load_versions / load_testset 发现旧目录时抛的)带详细消息
+        # —— 这种要原样透传给用户,不能被吞成 "<label> 找不到"
+        msg = str(e)
+        if "请改名为" in msg:
+            raise WorkflowError(msg) from None
         raise WorkflowError(f"{label} 找不到") from None
     except json.JSONDecodeError as e:
         raise WorkflowError(
@@ -96,7 +101,7 @@ class ReviewResult:
     out_path: Path
     missing: list[str]   # 未起草的产物 —— 文件不存在
     broken: list[str]    # parse 失败的产物 —— 文件存在但读不出来,格式 "name(解析失败:msg)"
-    skipped: list[str]   # 未检查的产物 —— 自己没坏,但依赖的文件坏了(如 测试集 依赖 program 读对话模式)
+    skipped: list[str]   # 未检查的产物 —— 自己没坏,但依赖的文件坏了(如 cases 依赖 program 读对话模式)
     warnings: list[str]  # validate() 校验提醒 —— brief 未填全、rubric 权重错、case 缺起始输入 等
 
 
@@ -108,7 +113,7 @@ def baseline_problems(versions: list[Version], compare_mode: str) -> list[str]:
     baselines = [v.version_id for v in versions if v.is_baseline]
     if compare_mode == "对基线":
         if len(baselines) == 0:
-            return ["对比方式=对基线,但 versions/ 里没有标基线的版本(要恰好 1 个)"]
+            return ["对比方式=对基线,但 harnesses/ 里没有标基线的 harness variant(要恰好 1 个)"]
         if len(baselines) > 1:
             return [f"对比方式=对基线,但有 {len(baselines)} 个版本标了基线"
                     f"(只能 1 个):{'、'.join(baselines)}"]
@@ -119,7 +124,7 @@ def run_preflight(program: Program, versions: list[Version],
                   cases: list[TestCase]) -> list[str]:
     """run 前的聚合校验。返回带来源标注的问题清单;空清单 = 可以跑。
 
-    把 hdl show / versions / cases 各自能查到的问题,在跑之前一次性拦下。
+    把 ahl show / versions / cases 各自能查到的问题,在跑之前一次性拦下。
     最典型的是 case 段名写错(「## 初始输入」而非「## 起始输入」),起始输入
     解析成空串,run 不报错、直接把空输入发给 agent。program 没填、版本缺
     「这是什么」、基线数量不对同理 —— show 里看得到的,run 不该绕过。
@@ -135,7 +140,7 @@ def run_preflight(program: Program, versions: list[Version],
 
 
 def run(exp_dir: Path, use_llm: bool) -> RunResult:
-    """跑实验:加载 → 校验 → 每个版本过测试集 → 存对话。
+    """跑实验:加载 → 校验 → 每个 harness variant 过 cases → 存对话。
 
     program / 版本 / case / 基线数量 / 接入配置 任一不过,都抛 WorkflowError。
     """
@@ -143,15 +148,15 @@ def run(exp_dir: Path, use_llm: bool) -> RunResult:
     if not program_path.exists():
         raise WorkflowError(f"实验里没有 program.md:{exp_dir}")
     program = _safe_call("program.md", parse_program, program_path)
-    versions = _safe_call("versions/", load_versions, exp_dir)
-    cases = _safe_call("测试集/", load_testset, exp_dir)
+    versions = _safe_call("harnesses/", load_versions, exp_dir)
+    cases = _safe_call("cases/", load_testset, exp_dir)
     if not versions or not cases:
-        raise WorkflowError("versions/ 或 测试集/ 是空的,没法跑")
+        raise WorkflowError("harnesses/ 或 cases/ 是空的,没法跑")
 
     problems = run_preflight(program, versions, cases)
     if problems:
         raise WorkflowError(
-            "跑不了,先修下面的问题(hdl show / versions / cases 可单独查):\n  - "
+            "跑不了,先修下面的问题(ahl show / versions / cases 可单独查):\n  - "
             + "\n  - ".join(problems))
 
     # 接入:版本自带的优先;没有就回退工作区根的 connect.md。
@@ -164,7 +169,7 @@ def run(exp_dir: Path, use_llm: bool) -> RunResult:
         if connect is None:
             raise WorkflowError(
                 f"这些版本要用全局 connect.md:{'、'.join(needs_global)}\n"
-                "  但工作区根没有 connect.md(hdl init 会生成),"
+                "  但工作区根没有 connect.md(ahl init 会生成),"
                 "或给这些版本各自加「类型」「配置」段")
         connect_issues = connect.validate()
         if connect_issues:
@@ -173,10 +178,14 @@ def run(exp_dir: Path, use_llm: bool) -> RunResult:
                 "  但 connect.md 有问题:\n  - " + "\n  - ".join(connect_issues))
 
     if use_llm:
-        sim_path = exp_dir / "模拟器.md"
+        sim_path = exp_dir / "simulator.md"
         if not sim_path.exists():
-            raise WorkflowError(f"--llm 要 模拟器.md,实验里没有:{exp_dir}")
-        parsed_sim = _safe_call("模拟器.md", parse_simulator, sim_path)
+            if (exp_dir / "模拟器.md").exists():
+                raise WorkflowError(
+                    f"--llm 要 simulator.md,发现旧文件 模拟器.md,"
+                    f"请改名为 simulator.md(Phase 2 命名同步):{exp_dir}")
+            raise WorkflowError(f"--llm 要 simulator.md,实验里没有:{exp_dir}")
+        parsed_sim = _safe_call("simulator.md", parse_simulator, sim_path)
         try:
             simulator = make_llm_simulator(parsed_sim)
         except RuntimeError as e:
@@ -216,24 +225,24 @@ def score(exp_dir: Path, use_llm: bool) -> ScoreResult:
     results_dir = exp_dir / "results"
     run_files = sorted(results_dir.glob("run-*.json")) if results_dir.exists() else []
     if not run_files:
-        raise WorkflowError("还没有 run 结果,先 hdl run")
+        raise WorkflowError("还没有 run 结果,先 ahl run")
     run_file = run_files[-1]
 
     rubric = _safe_call("rubric.md", parse_rubric, rubric_path)
     rubric_problems = rubric.validate()
     if rubric_problems:
         raise WorkflowError(
-            "rubric 有问题,先修(hdl rubric 可单独查):\n  - "
+            "rubric 有问题,先修(ahl rubric 可单独查):\n  - "
             + "\n  - ".join(rubric_problems))
     runs = _safe_call(f"results/{run_file.name}", _load_json, run_file)
 
     if use_llm:
-        missing = [v for v in ("HDL_JUDGE_BASE_URL", "HDL_JUDGE_MODEL", "HDL_JUDGE_API_KEY")
+        missing = [v for v in ("AHL_JUDGE_BASE_URL", "AHL_JUDGE_MODEL", "AHL_JUDGE_API_KEY")
                    if not os.environ.get(v)]
         if missing:
             raise WorkflowError(f"--llm 要先设环境变量:{'、'.join(missing)}")
         grader = llm_grader
-        grader_name = f"LLM Judge({os.environ.get('HDL_JUDGE_MODEL')})"
+        grader_name = f"LLM Judge({os.environ.get('AHL_JUDGE_MODEL')})"
     else:
         grader = stub_grader
         grader_name = "本地桩(未接真模型)"
@@ -270,15 +279,15 @@ def compare(exp_dir: Path) -> CompareResult:
     results_dir = exp_dir / "results"
     score_files = sorted(results_dir.glob("score-*.json")) if results_dir.exists() else []
     if not score_files:
-        raise WorkflowError("还没有 score 结果,先 hdl score")
+        raise WorkflowError("还没有 score 结果,先 ahl score")
     score_file = score_files[-1]
     data = _safe_call(f"results/{score_file.name}", _load_json, score_file)
     scores = data.get("scores", [])
     if not scores:
         raise WorkflowError("score 文件里没有分数")
 
-    if (exp_dir / "versions").is_dir():
-        versions = _safe_call("versions/", load_versions, exp_dir)
+    if (exp_dir / "harnesses").is_dir():
+        versions = _safe_call("harnesses/", load_versions, exp_dir)
     else:
         versions = []
     program_path = exp_dir / "program.md"
@@ -305,7 +314,7 @@ def review(exp_dir: Path) -> ReviewResult:
     宽松 —— 三态:文件不存在 = 未起草、parse 失败 = 解析失败:<msg>、
     parse 通过 = ok(ok 后再跑 validate(),问题作为「校验提醒」内联展示)。
     不抛错。review 是 authoring loop 里的状态快照,外层 agent 边 author
-    边跑 review 看进度。硬关卡是 hdl run 的 preflight,不在这里。
+    边跑 review 看进度。硬关卡是 ahl run 的 preflight,不在这里。
     """
     if not exp_dir.exists():
         raise WorkflowError(f"找不到实验:{exp_dir}")
@@ -320,7 +329,7 @@ def review(exp_dir: Path) -> ReviewResult:
             return None, f"解析失败:{e!s}"
 
     def _dir_piece(loader) -> tuple:
-        """versions/ 和 测试集/ —— 目录粒度,整体一个 status。"""
+        """harnesses/ 和 cases/ —— 目录粒度,整体一个 status。"""
         try:
             items = loader(exp_dir)
             return items, ("ok" if items else "未起草")
@@ -332,10 +341,10 @@ def review(exp_dir: Path) -> ReviewResult:
     brief = _piece(parse_brief, exp_dir / "brief.md")
     program = _piece(parse_program, exp_dir / "program.md")
     rubric = _piece(parse_rubric, exp_dir / "rubric.md")
-    simulator = _piece(parse_simulator, exp_dir / "模拟器.md")
+    simulator = _piece(parse_simulator, exp_dir / "simulator.md")
     versions = _dir_piece(load_versions)
-    # P1.a:测试集 依赖 program 的「对话模式」—— program 解析失败时不要 cascade
-    # 调 load_testset(那会让 测试集 也被误标「解析失败」),改成「未检查」单独 surface。
+    # P1.a:cases 依赖 program 的「对话模式」—— program 解析失败时不要 cascade
+    # 调 load_testset(那会让 cases 也被误标「解析失败」),改成「未检查」单独 surface。
     if program[1].startswith("解析失败"):
         cases = ([], f"未检查:program.md {program[1]}")
     else:
@@ -346,8 +355,8 @@ def review(exp_dir: Path) -> ReviewResult:
     skipped: list[str] = []
     for name, (_obj, state) in (
         ("brief.md", brief), ("program.md", program),
-        ("versions/", versions), ("测试集/", cases),
-        ("rubric.md", rubric), ("模拟器.md", simulator),
+        ("harnesses/", versions), ("cases/", cases),
+        ("rubric.md", rubric), ("simulator.md", simulator),
     ):
         if state == "未起草":
             missing.append(name)
@@ -361,7 +370,7 @@ def review(exp_dir: Path) -> ReviewResult:
     warnings: list[str] = []
     for name, (obj, state) in (
         ("brief.md", brief), ("program.md", program),
-        ("rubric.md", rubric), ("模拟器.md", simulator),
+        ("rubric.md", rubric), ("simulator.md", simulator),
     ):
         if obj is not None and state == "ok":
             warnings += [f"{name}:{p}" for p in obj.validate()]
@@ -402,12 +411,12 @@ def _build_review(exp_name, brief, program, versions, cases, rubric, simulator) 
         else:
             lines.append(f"- 实验目标:(program.md 的「假设」段为空){warn}")
 
-    # 版本
+    # harness variants
     v_list, v_state = versions
     if v_state == "未起草":
-        lines.append("- 版本:**versions/ 未起草**")
+        lines.append("- harnesses:**harnesses/ 未起草**")
     elif v_state != "ok":
-        lines.append(f"- 版本:**versions/ {v_state}**")
+        lines.append(f"- harnesses:**harnesses/ {v_state}**")
     else:
         for v in v_list:
             tag = "(基线)" if v.is_baseline else ""
@@ -446,14 +455,14 @@ def _build_review(exp_name, brief, program, versions, cases, rubric, simulator) 
         else:
             lines.append("- 红线(brief):(空)")
 
-    # 测试集
+    # cases
     c_list, c_state = cases
     if c_state == "未起草":
-        lines.append("- 测试集:**测试集/ 未起草**")
+        lines.append("- cases:**cases/ 未起草**")
     elif c_state != "ok":
-        lines.append(f"- 测试集:**测试集/ {c_state}**")
+        lines.append(f"- cases:**cases/ {c_state}**")
     else:
-        lines.append(f"- 测试集:{len(c_list)} 个 case")
+        lines.append(f"- cases:{len(c_list)} 个 case")
         for c in c_list:
             first = c.opening.splitlines()[0] if c.opening.strip() else "(空)"
             if len(first) > 50:
@@ -462,19 +471,19 @@ def _build_review(exp_name, brief, program, versions, cases, rubric, simulator) 
             warn = f"  ⚠ {'、'.join(problems)}" if problems else ""
             lines.append(f"  - {c.case_id}:{first}{warn}")
 
-    # 模拟器
+    # simulator
     s_obj, s_state = simulator
     if s_state == "未起草":
-        lines.append("- 模拟器:**模拟器.md 未起草**")
+        lines.append("- simulator:**simulator.md 未起草**")
     elif s_state != "ok":
-        lines.append(f"- 模拟器:**模拟器.md {s_state}**")
+        lines.append(f"- simulator:**simulator.md {s_state}**")
     else:
         persona = s_obj.persona.splitlines()[0] if s_obj.persona.strip() else "(空)"
         if len(persona) > 50:
             persona = persona[:50] + "…"
         problems = s_obj.validate()
         warn = f"  ⚠ 校验:{'、'.join(problems)}" if problems else ""
-        lines.append(f"- 模拟器人设:{persona}{warn}")
+        lines.append(f"- simulator 人设:{persona}{warn}")
 
     # 来源 —— v2-minimal 用集中式 provenance(per-file frontmatter 留 v2.5)
     def _src(state: str, human_owned: bool = False) -> str:
@@ -485,12 +494,12 @@ def _build_review(exp_name, brief, program, versions, cases, rubric, simulator) 
     lines += ["", "## 来源",
               f"- brief.md:{_src(brief[1], human_owned=True)}",
               f"- program.md:{_src(program[1])}",
-              f"- versions/:{_src(versions[1])}",
-              f"- 测试集/:{_src(cases[1])}",
+              f"- harnesses/:{_src(versions[1])}",
+              f"- cases/:{_src(cases[1])}",
               f"- rubric.md:{_src(rubric[1])}",
-              f"- 模拟器.md:{_src(simulator[1])}"]
+              f"- simulator.md:{_src(simulator[1])}"]
 
     lines += ["",
               "重点核 rubric 和红线 —— 它们是锚点;要改就直接改对应文件,"
-              "再跑 hdl review。"]
+              "再跑 ahl review。"]
     return "\n".join(lines) + "\n"

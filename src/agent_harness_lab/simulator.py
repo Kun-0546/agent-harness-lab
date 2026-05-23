@@ -1,10 +1,10 @@
 """模拟器 —— 模拟模式下扮用户的那个 agent。
 
-模拟器 = experiment 里的 模拟器.md(人设 + 背景知识 + 追问策略)。
+模拟器 = experiment 里的 simulator.md(人设 + 背景知识 + 追问策略)。
 多轮 run 里,模拟器看着对话生成下一句用户话。
 - stub_simulator     —— 本地桩,固定追问,验代码用。
-- make_llm_simulator —— 真模拟器,调模型按 模拟器.md 生成追问。
-                        模型 / 端点 / key 从 HDL_SIM_* 环境变量读。
+- make_llm_simulator —— 真模拟器,调模型按 simulator.md 生成追问。
+                        模型 / 端点 / key 从 AHL_SIM_* 环境变量读。
 """
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from harness_design_loop import llm, mdutil
+from agent_harness_lab import llm, mdutil
 
 _STUB_FOLLOWUPS = [
     "这个能再具体点吗?给个数。",
@@ -47,7 +47,7 @@ class Simulator:
 
 
 def parse_simulator(path: str | Path) -> Simulator:
-    """读 模拟器.md,解析成 Simulator。"""
+    """读 simulator.md,解析成 Simulator。"""
     path = Path(path)
     sec = mdutil.split_sections(path.read_text(encoding="utf-8"))
     return Simulator(
@@ -80,13 +80,13 @@ def build_simulator_prompt(sim: Simulator, transcript: list) -> str:
 
 def make_llm_simulator(sim: Simulator) -> Callable[[list], "str | None"]:
     """从模拟器配置造一个真模拟器函数(调模型生成追问)。"""
-    base = os.environ.get("HDL_SIM_BASE_URL", "")
-    model = os.environ.get("HDL_SIM_MODEL", "")
-    key = os.environ.get("HDL_SIM_API_KEY", "")
+    base = os.environ.get("AHL_SIM_BASE_URL", "")
+    model = os.environ.get("AHL_SIM_MODEL", "")
+    key = os.environ.get("AHL_SIM_API_KEY", "")
     if not (base and model and key):
         raise RuntimeError(
             "没配模拟器模型 —— 设环境变量 "
-            "HDL_SIM_BASE_URL / HDL_SIM_MODEL / HDL_SIM_API_KEY")
+            "AHL_SIM_BASE_URL / AHL_SIM_MODEL / AHL_SIM_API_KEY")
 
     def _sim(transcript: list) -> str | None:
         reply = llm.chat(base, model, key, build_simulator_prompt(sim, transcript)).strip()

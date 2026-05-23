@@ -1,12 +1,13 @@
 [project]
-name = "harness-design-loop"
+name = "agent-harness-lab"
 version = "0.1.0"
-description = "A loop for AI product research: a coding agent runs experiments, a PM steers the goal."
+description = "A workflow tool for designing, testing, and improving agent runtime harnesses."
 requires-python = ">=3.10"
 dependencies = []
 
 [project.scripts]
-hdl = "harness_design_loop.cli:main"
+ahl = "agent_harness_lab.cli:main"
+hdl = "agent_harness_lab.cli:hdl_legacy_redirect"
 
 [build-system]
 requires = ["setuptools>=68"]

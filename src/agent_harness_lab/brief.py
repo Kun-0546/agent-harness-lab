@@ -1,15 +1,15 @@
 """读一个实验的 brief.md —— 人写的自然语言实验意图(v2)。
 
 brief 是 V2 的入口:人写它,外层 coding agent(Claude Code / Cursor / Codex 等)
-据它起草 program 等执行文件。HDL 自己不调模型起草。格式见 docs/v2-minimal-spec.md §3。
+据它起草 program 等执行文件。AHL 自己不调模型起草。格式见 docs/v2-minimal-spec.md §3。
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
 
-from harness_design_loop import mdutil
-from harness_design_loop.program import COMPARE_MODES
+from agent_harness_lab import mdutil
+from agent_harness_lab.program import COMPARE_MODES
 
 
 @dataclass

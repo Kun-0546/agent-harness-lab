@@ -1,26 +1,34 @@
-# Harness Design Loop
+# Agent Harness Lab
 
 English | [中文](README_CN.md)
 
-> A command-line tool for AI product research: change your agent, then measure whether the change made it better, worse, or no different.
+> A workbench for humans and coding agents to design, test, and improve the **runtime harnesses** that shape agent behavior.
 
-`hdl` runs experiments. You describe your agent, a goal, a set of test cases, and a rubric; the tool runs each version of the agent through the tests, scores the conversations, and lays the versions side by side so you can see what the change did.
+Change a harness — a prompt, a tool config, a memory rule, a workflow — then measure whether the change made the agent better, worse, or no different. `ahl` runs experiments: you describe a goal, a set of harness variants, a set of test cases, and a rubric; the tool drives each variant through the cases, scores the conversations, and lays the variants side by side so you can see what the change did.
 
 ## Why this exists
 
 I am an AI Product Manager. My day job is designing memory, skill, and harness features for AI agents — features where you can't write a PRD on Monday and ship it Friday, because the design surface is in flight and the right answer is unknown when you start.
 
-For months I ran the same loop on my own work: define a goal, build a change, run experiments, look at the data, refine the goal, repeat. The pattern was consistent enough to treat as an architecture, not a workflow. `hdl` is that loop, extracted into a tool.
+For months I ran the same loop on my own work: define a goal, build a change, run experiments, look at the data, refine the goal, repeat. The pattern was consistent enough to treat as an architecture, not a workflow. `ahl` is that loop, extracted into a tool — but with a sharper claim than "evaluate agents": this tool's first-class object is the **harness** that wraps the agent, not the agent itself. See [`docs/product-definition.md`](docs/product-definition.md) for the full framing.
 
 ## What it does
 
-An experiment compares a few **versions** of an agent — `V1`, `V2`, `V3`, one held fixed as the baseline — against the same test set.
+An experiment compares a few **harness variants** of an agent — `V1`, `V2`, `V3`, one held fixed as the baseline — against the same set of cases.
 
-- **run** — drive every version through the test set; each test case becomes a multi-turn conversation.
+- **run** — drive every variant through the cases; each case becomes a multi-turn conversation.
 - **score** — grade every conversation against a rubric (dimensions + weights).
-- **compare** — lay the versions side by side: total scores, per-dimension deltas vs. the baseline, regressed dimensions.
+- **compare** — lay the variants side by side: total scores, per-dimension deltas vs. the baseline, regressed dimensions.
 
-Each experiment is a self-contained folder — its program, versions, test set, rubric, and results — that you can re-run and re-score.
+Each experiment is a self-contained folder — its program, harness variants, cases, rubric, and results — that you can re-run and re-score.
+
+## Three product modes
+
+`ahl` exposes three modes (full detail in [`docs/product-modes.md`](docs/product-modes.md)):
+
+- **Manual** — you design harness variants and the experiment; `ahl` validates, runs, scores, compares. **v1, done.**
+- **Co-pilot** — an external coding agent (Claude Code / Cursor / Codex) drafts variants and the experiment package from your `brief.md`; you confirm anchors. **v2-minimal, current branch.**
+- **Auto** — agents iterate harnesses inside rules, budgets, and approval gates; escalate to you on anomalies. **Future mode; depends on Runtime Materialization (`docs/runtime-materialization.md`) maturing.**
 
 ## Install
 
@@ -28,50 +36,52 @@ Requires Python 3.10+.
 
 ```
 git clone <repo-url>
-cd harness-design-loop
+cd agent-harness-lab
 pip install -e .
 ```
 
-This installs the `hdl` command. If your shell reports `hdl: command not found`, the script directory isn't on your PATH — add it, or run the tool as `python -m harness_design_loop` (on Windows, `py -m harness_design_loop`).
+This installs the `ahl` command. If your shell reports `ahl: command not found`, the script directory isn't on your PATH — add it, or run the tool as `python -m agent_harness_lab` (on Windows, `py -m agent_harness_lab`).
 
 ## Quickstart
 
 ```
-hdl init                     # create connect.md, goal.md, experiments/
+ahl init                     # create connect.md, goal.md, experiments/
 # edit connect.md — tell the tool how to reach your agent
-hdl new my-experiment        # scaffold experiments/001-my-experiment/
-# fill in program.md, rubric.md, versions/, and 测试集/ (test cases)
-hdl run 001                  # run every version through the test set
-hdl score 001                # score the conversations
-hdl compare 001              # compare the versions
+ahl new my-experiment        # scaffold experiments/001-my-experiment/
+# populate: program.md, rubric.md, harnesses/, cases/, simulator.md
+ahl run 001 ; ahl score 001 ; ahl compare 001
 ```
 
 `examples/` ships a minimal agent for each of the four connection types (in-process library, external CLI, HTTP stateless, HTTP stateful), each with its protocol documented — start by pointing the tool at one of those.
 
-By default `run` and `score` use built-in stubs (a canned simulator and a hash-based grader) — enough to smoke-test the pipeline, not to produce real results. For real runs, pass `--llm` and set the model environment variables (`HDL_SIM_*` for the simulator, `HDL_JUDGE_*` for the grader).
+By default `run` and `score` use built-in stubs (a canned simulator and a hash-based grader) — enough to smoke-test the pipeline, not to produce real results. For real runs, pass `--llm` and set the model environment variables (`AHL_SIM_*` for the simulator, `AHL_JUDGE_*` for the grader).
 
 ## Commands
 
-`init` · `connect` · `new` · `show` · `cases` · `rubric` · `simulator` · `versions` · `run` · `score` · `compare` · `draft` · `review`. Run `hdl --help` or `hdl <command> --help` for details.
+`init` · `connect` · `new` · `show` · `cases` · `rubric` · `simulator` · `harnesses` · `run` · `score` · `compare` · `draft` · `review`. Run `ahl --help` or `ahl <command> --help` for details.
 
 ## Status
 
-**v1 — a trusted manual loop.** The full `init → run → score → compare` pipeline runs end to end and rejects malformed input up front. The `--llm` path (real simulator + LLM judge) has been run end to end in a local experiment, not only on the built-in stubs; no polished case study is published yet. Known gaps:
+**v1 — a trusted Manual loop.** The full `init → run → score → compare` pipeline runs end to end and rejects malformed input up front. The `--llm` path (real simulator + LLM judge) has been run end to end in a local experiment, not only on the built-in stubs; no polished case study is published yet. Known gaps:
 
 - `depends_on` (seeding a case's opening context from a prior case) is parsed and shown, but `run` does not use it yet.
 - `run` / `score` default to stubs; real scoring needs `--llm` and API keys.
-- Only the "simulated" conversation mode is implemented; replay and scripted modes, the self-iterating run mode, environment snapshots, and noise/trial handling are not built yet.
+- Only the "simulated" conversation mode is implemented; replay and scripted modes, the Auto mode, environment snapshots, and noise/trial handling are not built yet.
 - No polished case study published yet — treat this as an architecture being proposed.
 
-On the `v2-agent-drafted-lab` branch, `hdl draft` opens a scaffolded authoring workspace for an **external coding agent** (Claude Code / Cursor / Codex). The agent reads `brief.md` and authors `program.md` / `versions/` / `测试集/` / `rubric.md` / `模拟器.md`; HDL itself does not call a model to draft them. `hdl review` then produces an auditable `review.md` (permissive — marks any missing piece as "未起草"). See `docs/v2-minimal-spec.md` (implementation slice) and `docs/agent-authoring-guide.md` (agent-facing guide).
+On the `v2-agent-drafted-lab` branch (the Co-pilot mode track), `ahl draft` opens a scaffolded authoring workspace for an **external coding agent**. The agent reads `brief.md` and authors `program.md` / `harnesses/` / `cases/` / `rubric.md` / `simulator.md`; `ahl` itself does not call a model to draft them. `ahl review` then produces an auditable `review.md` (permissive — marks any missing piece as "未起草"). See [`docs/v2-minimal-spec.md`](docs/v2-minimal-spec.md) (implementation slice) and [`docs/agent-authoring-guide.md`](docs/agent-authoring-guide.md) (agent-facing guide).
 
-Where v2 and beyond are headed — agents drafting and operating experiments while humans keep the anchors — is laid out in `docs/design-v0.4.1.md`.
+The next-stage core capability — making each run reproducible against a specific harness × runtime — is specified in [`docs/runtime-materialization.md`](docs/runtime-materialization.md) (design only, not implemented).
+
+## History
+
+This project began as **HDL / Harness Design Loop**. It is now renamed to **Agent Harness Lab** to make explicit what the first-class object actually is. HDL remains as a historical codename in commit history, old branches, and the v1 design docs (`docs/design-v0.3.md` / `docs/design-v0.4.1.md`).
 
 ## Related Work
 
-**Heuristic Learning** — Jiayi Weng, *Learning Beyond Gradients* (2026): a coding agent improves a software system by editing code — rules, state, tests, memory — rather than training neural-network parameters. `hdl` is a tool for running that kind of loop.
+**Heuristic Learning** — Jiayi Weng, *Learning Beyond Gradients* (2026): a coding agent improves a software system by editing code — rules, state, tests, memory — rather than training neural-network parameters. `ahl` is a tool for running that kind of loop.
 
-**Karpathy's AutoResearch** (2026) demonstrated an automated research loop on ML training against a fixed objective. `hdl` addresses an adjacent problem — AI *product* research, where the goal itself is under revision. A reference, not a template.
+**Karpathy's AutoResearch** (2026) demonstrated an automated research loop on ML training against a fixed objective. `ahl` addresses an adjacent problem — AI *product* research, where the goal itself is under revision. A reference, not a template.
 
 ## Author
 

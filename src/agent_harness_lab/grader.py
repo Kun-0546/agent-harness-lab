@@ -3,8 +3,8 @@
 两种评分器实现:
 - stub_grader —— 本地桩,不调模型,给伪分,只为验代码。
 - llm_grader  —— LLM Judge,调一个 OpenAI 兼容模型按 rubric 打分。
-                 模型 / 端点 / key 从环境变量读:HDL_JUDGE_BASE_URL /
-                 HDL_JUDGE_MODEL / HDL_JUDGE_API_KEY。
+                 模型 / 端点 / key 从环境变量读:AHL_JUDGE_BASE_URL /
+                 AHL_JUDGE_MODEL / AHL_JUDGE_API_KEY。
 
 跑和打分分开:打分便宜、能重打(换 rubric / 换模型再打一遍)。
 """
@@ -16,8 +16,8 @@ import os
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from harness_design_loop import llm
-from harness_design_loop.rubric import Rubric
+from agent_harness_lab import llm
+from agent_harness_lab.rubric import Rubric
 
 # 评分器:给 (rubric, 版本, case, 对话 transcript) -> {维度名: 分(1-10)}。
 Grader = Callable[[Rubric, str, str, list], dict]
@@ -90,14 +90,14 @@ def parse_judge_response(text: str, rubric: Rubric) -> dict[str, float]:
 
 
 def _call_llm(prompt: str) -> str:
-    """调评分模型。端点 / 模型 / key 从 HDL_JUDGE_* 环境变量读。"""
-    base = os.environ.get("HDL_JUDGE_BASE_URL", "")
-    model = os.environ.get("HDL_JUDGE_MODEL", "")
-    key = os.environ.get("HDL_JUDGE_API_KEY", "")
+    """调评分模型。端点 / 模型 / key 从 AHL_JUDGE_* 环境变量读。"""
+    base = os.environ.get("AHL_JUDGE_BASE_URL", "")
+    model = os.environ.get("AHL_JUDGE_MODEL", "")
+    key = os.environ.get("AHL_JUDGE_API_KEY", "")
     if not (base and model and key):
         raise RuntimeError(
             "没配评分模型 —— 设环境变量 "
-            "HDL_JUDGE_BASE_URL / HDL_JUDGE_MODEL / HDL_JUDGE_API_KEY")
+            "AHL_JUDGE_BASE_URL / AHL_JUDGE_MODEL / AHL_JUDGE_API_KEY")
     return llm.chat(base, model, key, prompt)
 
 

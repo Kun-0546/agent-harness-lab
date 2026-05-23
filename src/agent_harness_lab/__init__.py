@@ -1,0 +1,3 @@
+"""Agent Harness Lab — AI 产品研究的实验循环。"""
+
+__version__ = "0.1.0"

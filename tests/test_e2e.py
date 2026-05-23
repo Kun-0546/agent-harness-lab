@@ -14,7 +14,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from harness_design_loop import cli, workflow
+from agent_harness_lab import cli, workflow
 
 # 一个最小的「进程内库」agent —— 回显最后一句用户话。
 _AGENT_MODULE = '''\
@@ -86,13 +86,13 @@ class TestEndToEnd(unittest.TestCase):
 
         (self.root / "connect.md").write_text(_CONNECT, encoding="utf-8")
         self.exp = self.root / "experiments" / "001-e2e"
-        (self.exp / "测试集").mkdir(parents=True)
-        (self.exp / "versions").mkdir()
+        (self.exp / "cases").mkdir(parents=True)
+        (self.exp / "harnesses").mkdir()
         (self.exp / "program.md").write_text(_PROGRAM, encoding="utf-8")
         (self.exp / "rubric.md").write_text(_RUBRIC, encoding="utf-8")
-        (self.exp / "versions" / "V1.md").write_text(_V1, encoding="utf-8")
-        (self.exp / "versions" / "V2.md").write_text(_V2, encoding="utf-8")
-        (self.exp / "测试集" / "D-01.md").write_text(_CASE, encoding="utf-8")
+        (self.exp / "harnesses" / "V1.md").write_text(_V1, encoding="utf-8")
+        (self.exp / "harnesses" / "V2.md").write_text(_V2, encoding="utf-8")
+        (self.exp / "cases" / "D-01.md").write_text(_CASE, encoding="utf-8")
 
     def test_workflow_run_score_compare(self) -> None:
         """workflow 层:直接调 run / score / compare。"""
@@ -126,11 +126,11 @@ class TestEndToEnd(unittest.TestCase):
 
 
 class TestExternalAgentAuthoring(unittest.TestCase):
-    """V2:模拟外层 coding agent 据 brief.md 写文件 → hdl review → run/score/compare。
+    """V2:模拟外层 coding agent 据 brief.md 写文件 → ahl review → run/score/compare。
 
-    HDL 不调模型起草 —— 这里测试代码直接 write_text 扮演那个外层 agent
+    AHL 不调模型起草 —— 这里测试代码直接 write_text 扮演那个外层 agent
     (Claude Code / Cursor / Codex)。证 v2-minimal 的真实使用路径:
-    scaffold(hdl draft)→ 人填 brief → agent 起草 → hdl review → v1 管线。
+    scaffold(ahl draft)→ 人填 brief → agent 起草 → ahl review → v1 管线。
     """
 
     BRIEF = (
@@ -162,7 +162,7 @@ class TestExternalAgentAuthoring(unittest.TestCase):
         "## 关键信息保留\n权重: 0.4\n来自 brief 红线:不能漏关键信息。\n"
     )
     AUTHORED_SIMULATOR = (
-        "# 模拟器\n\n## 人设\n一个普通用户,沟通直接。\n\n"
+        "# simulator\n\n## 人设\n一个普通用户,沟通直接。\n\n"
         "## 背景知识\n(无)\n\n## 追问策略\n盯没答透的点追问两三轮。\n"
     )
 
@@ -186,7 +186,7 @@ class TestExternalAgentAuthoring(unittest.TestCase):
         self.addCleanup(os.chdir, original)
         exp = self.root / "experiments" / "001-demo"
         with contextlib.redirect_stdout(io.StringIO()):
-            # 1. hdl draft —— 只 scaffold,不调模型
+            # 1. ahl draft —— 只 scaffold,不调模型
             self.assertEqual(cli.main(["draft", "demo"]), 0)
             self.assertTrue((exp / "brief.md").exists())
             # scaffold-only:program 等等都没起草
@@ -195,7 +195,7 @@ class TestExternalAgentAuthoring(unittest.TestCase):
             # 2. 人填 brief.md
             (exp / "brief.md").write_text(self.BRIEF, encoding="utf-8")
 
-            # 3. 没 author 前跑 hdl review —— 宽松,出 review.md,标 5 个「未起草」
+            # 3. 没 author 前跑 ahl review —— 宽松,出 review.md,标 5 个「未起草」
             self.assertEqual(cli.main(["review", "demo"]), 0)
             review_text = (exp / "review.md").read_text(encoding="utf-8")
             self.assertIn("未起草", review_text)
@@ -203,18 +203,18 @@ class TestExternalAgentAuthoring(unittest.TestCase):
 
             # 4. 模拟外层 coding agent 据 brief.md 起草整套产物
             (exp / "program.md").write_text(self.AUTHORED_PROGRAM, encoding="utf-8")
-            (exp / "versions" / "V1.md").write_text(self.AUTHORED_V1, encoding="utf-8")
-            (exp / "versions" / "V2.md").write_text(self.AUTHORED_V2, encoding="utf-8")
-            (exp / "测试集" / "D-01.md").write_text(self.AUTHORED_CASE, encoding="utf-8")
+            (exp / "harnesses" / "V1.md").write_text(self.AUTHORED_V1, encoding="utf-8")
+            (exp / "harnesses" / "V2.md").write_text(self.AUTHORED_V2, encoding="utf-8")
+            (exp / "cases" / "D-01.md").write_text(self.AUTHORED_CASE, encoding="utf-8")
             (exp / "rubric.md").write_text(self.AUTHORED_RUBRIC, encoding="utf-8")
-            (exp / "模拟器.md").write_text(self.AUTHORED_SIMULATOR, encoding="utf-8")
+            (exp / "simulator.md").write_text(self.AUTHORED_SIMULATOR, encoding="utf-8")
 
-            # 5. 再跑 hdl review —— 都齐了,review.md 不再有「未起草」
+            # 5. 再跑 ahl review —— 都齐了,review.md 不再有「未起草」
             self.assertEqual(cli.main(["review", "demo"]), 0)
             review_text = (exp / "review.md").read_text(encoding="utf-8")
             self.assertNotIn("未起草", review_text)
             self.assertIn("external_agent_drafted", review_text)
-            self.assertIn("D-01", review_text)        # 测试集 case 清单
+            self.assertIn("D-01", review_text)        # cases 清单
             self.assertIn("信息密度", review_text)     # rubric 维度
 
             # 6. v1 管线:run / score / compare 不区分文件来源
