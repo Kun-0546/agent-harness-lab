@@ -16,7 +16,7 @@ from agent_harness_lab.brief import parse_brief
 from agent_harness_lab.comparator import compare_scores
 from agent_harness_lab.connect import parse_connect
 from agent_harness_lab.grader import llm_grader, score_run, stub_grader
-from agent_harness_lab.materialize import MaterializeContext
+from agent_harness_lab.materialize import MaterializeContext, adapter_for
 from agent_harness_lab.program import Program, parse_program
 from agent_harness_lab.rubric import parse_rubric
 from agent_harness_lab.runner import run_experiment
@@ -29,6 +29,7 @@ from agent_harness_lab.simulator import (
     parse_simulator,
     stub_simulator,
 )
+from agent_harness_lab.snapshot import build_snapshot, write_snapshot
 from agent_harness_lab.testset import TestCase, load_testset
 from agent_harness_lab.version import Version, load_versions
 
@@ -149,11 +150,11 @@ def run(exp_dir: Path, use_llm: bool) -> RunResult:
 
     program / 版本 / case / 基线数量 / 接入配置 任一不过,都抛 WorkflowError。
 
-    C3 加 Runtime Materialization preflight:
+    Runtime Materialization preflight:
     - parse workspace 根的 runtime-sources.md (不存在返回空 list)
     - cross-validate variant.runtime_source 引用是否都在 sources 里
-    - C3 只支持 legacy (无 runtime_source);写了 runtime_source 的 variant
-      hard fail("adapter 还没实现",留 C4-C5)
+    - 当前只支持 legacy (无 runtime_source);写了 runtime_source 的 variant
+      hard fail("adapter 还没实现";local_path 留 C5, git_repo 留 C6)
     - 构造 MaterializeContext 传给 runner;runner 通过 adapter dispatch
     """
     program_path = exp_dir / "program.md"
@@ -178,7 +179,7 @@ def run(exp_dir: Path, use_llm: bool) -> RunResult:
     connect_path = workspace_root / "connect.md"
     connect = parse_connect(connect_path) if connect_path.exists() else None
 
-    # === C3:Runtime Materialization preflight ===
+    # === Runtime Materialization preflight ===
     # parse 错误(unknown type / duplicate / unknown field)由 _safe_call 翻成
     # WorkflowError "runtime-sources.md 解析失败:..."
     sources_path = workspace_root / "runtime-sources.md"
@@ -194,10 +195,10 @@ def run(exp_dir: Path, use_llm: bool) -> RunResult:
         raise WorkflowError(
             "runtime_source 引用有问题:\n  - " + "\n  - ".join(ref_problems))
 
-    # C3 只支持 legacy(无 runtime_source);写了的 → hard fail
+    # 当前只支持 legacy(无 runtime_source);写了的 → hard fail
     unsupported = [
         f"版本 {v.version_id}:写了 runtime_source={v.runtime_source!r},"
-        f"但 materialize adapter 还没实现 (留 C4-C5;当前 C3 只支持 legacy)"
+        f"但 materialize adapter 还没实现 (当前只支持 legacy;local_path 留 C5, git_repo 留 C6)"
         for v in versions if v.runtime_source is not None
     ]
     if unsupported:
@@ -242,7 +243,7 @@ def run(exp_dir: Path, use_llm: bool) -> RunResult:
     print(f"实验:{exp_dir.name}  {len(versions)} 版本 × {len(cases)} case,"
           f"多轮跑({sim_name})")
 
-    # C3:构造 ctx 传给 runner;adapter dispatch 在 runner 里。
+    # 构造 ctx 传给 runner;adapter dispatch 在 runner 里。
     run_id = f"run-{time.strftime('%Y%m%d-%H%M%S')}"
     ctx = MaterializeContext(
         run_id=run_id,
@@ -250,7 +251,23 @@ def run(exp_dir: Path, use_llm: bool) -> RunResult:
         fallback_connect=connect,
         runtime_sources=runtime_sources,
     )
-    runs = run_experiment(versions, cases, simulator, ctx)
+
+    # per variant 在跑之前 build_snapshot + write_snapshot 落盘。
+    # legacy snapshot 不依赖 sandbox(connect_md_hash 跟 materialize 是否成功无关),
+    # 所以即使 variant 后续 materialize 失败,snapshot.json 仍写得上,
+    # snapshots_map 也保证每个 variant 都有 snapshot_id ("legacy" 固定)。
+    # snapshot 是关键证据;写失败 hard fail 整个 run。
+    snapshots_map: dict[str, str] = {}
+    for v in versions:
+        try:
+            snap = build_snapshot(v, ctx, adapter_for(v))
+            write_snapshot(snap, exp_dir)
+        except OSError as e:
+            raise WorkflowError(
+                f"snapshot 写失败 (variant {v.version_id}):{e}") from e
+        snapshots_map[v.version_id] = snap.snapshot_id
+
+    runs = run_experiment(versions, cases, simulator, ctx, snapshots_map)
 
     results_dir = exp_dir / "results"
     results_dir.mkdir(exist_ok=True)

@@ -1,9 +1,9 @@
 """跑 —— 让被测 agent 过一遍测试集,产出多轮对话。
 
-C3 改造:接入方式不再直接读 connect,改为 adapter dispatch。
+接入方式走 adapter dispatch:
 - 每个 (variant, case):adapter.materialize → start → run session loop → teardown
 - LegacyAdapter (v0.2.0 兼容路径) 内部仍调 agentconn.open_session,行为等价
-- materialized adapter (local_path / git_repo) 留 C4-C5
+- materialized adapter:local_path 留 C5, git_repo 留 C6
 
 turn 0 发起始输入,之后模拟器现生用户话,到 max_turns 或模拟器收尾。
 """
@@ -32,13 +32,15 @@ class CaseRun:
     case_id: str
     transcript: list = field(default_factory=list)   # [{turn, user, agent}, ...]
     error: str = ""
+    snapshot_id: str = ""                            # 对应 RuntimeSnapshot 的 id;
+                                                     # legacy = "legacy",materialized = "snap-<run_id>-<variant_id>"
 
 
 def run_agent_session(session: AgentSession, opening: str, simulator: Simulator,
                       max_turns: int) -> list:
     """跑 session loop:session 必须已经 open;close 在本函数 finally 调。
 
-    C3 签名变化:不再接 Connect,改接已建好的 AgentSession (来自 adapter.start)。
+    签名:接已建好的 AgentSession (来自 adapter.start),不直接读 connect。
     """
     transcript: list = []
     try:
@@ -56,22 +58,29 @@ def run_agent_session(session: AgentSession, opening: str, simulator: Simulator,
 
 def run_experiment(versions: list[Version], cases: list[TestCase],
                    simulator: Simulator,
-                   ctx: MaterializeContext) -> list[CaseRun]:
+                   ctx: MaterializeContext,
+                   snapshots_map: dict[str, str]) -> list[CaseRun]:
     """每个 (variant, case) 起 sandbox 跑;adapter 处理 connect / materialize 细节。
 
-    C3:adapter_for(v) 只返回 LegacyAdapter (workflow.preflight 已 hard fail
+    当前 adapter_for(v) 只返回 LegacyAdapter (workflow.preflight 已 hard fail
     runtime_source 写了但 adapter 没实现的 variant)。
+
+    CaseRun.snapshot_id 从 snapshots_map[v.version_id] 查;workflow.run
+    在调用本函数之前已 per variant build_snapshot + write_snapshot,snapshots_map
+    保证每个 variant 都有 snapshot_id (legacy 固定 "legacy")。
 
     一个 case 的 exception (materialize 失败、start 失败、session 内 exception)
     都 catch 翻为 CaseRun.error,继续下一个 case —— 保 v0.2.0 行为等价。
-    spec §B.5 Q6 "hard fail" 留给 materialized adapter (C4-C5);在那时,
-    materialized adapter 在 preflight 抛 WorkflowError 早 fail,不到 runner。
+    spec §B.5 Q6 "hard fail" 留给 materialized adapter (local_path C5 / git_repo
+    C6 实现后);那时 materialized adapter 在 preflight 抛 WorkflowError 早 fail,
+    不到 runner。
     """
     runs: list[CaseRun] = []
     total = len(versions) * len(cases)
     done = 0
     for v in versions:
         adapter = adapter_for(v)
+        snapshot_id = snapshots_map[v.version_id]
         for c in cases:
             done += 1
             print(f"  [{done}/{total}] {v.version_id} / {c.case_id} …", flush=True)
@@ -83,11 +92,13 @@ def run_experiment(versions: list[Version], cases: list[TestCase],
                                             c.max_turns or 8)
                 finally:
                     adapter.teardown(sandbox)
-                runs.append(CaseRun(v.version_id, c.case_id, transcript=tr))
+                runs.append(CaseRun(v.version_id, c.case_id, transcript=tr,
+                                    snapshot_id=snapshot_id))
                 print(f"  [{done}/{total}] {v.version_id} / {c.case_id} ✓ {len(tr)} 轮",
                       flush=True)
             except Exception as exc:  # noqa: BLE001
-                runs.append(CaseRun(v.version_id, c.case_id, error=str(exc)))
+                runs.append(CaseRun(v.version_id, c.case_id, error=str(exc),
+                                    snapshot_id=snapshot_id))
                 print(f"  [{done}/{total}] {v.version_id} / {c.case_id} ✗ {exc}",
                       flush=True)
     return runs

@@ -449,7 +449,8 @@ class TestRuntimeSourcePreflight(unittest.TestCase):
         self.assertIn("not implemented yet", msg)
         self.assertIn("V1", msg)
         self.assertIn("openmanus-main", msg)
-        self.assertIn("C4-C5", msg)
+        self.assertIn("local_path 留 C5", msg)
+        self.assertIn("git_repo 留 C6", msg)
 
 
 if __name__ == "__main__":

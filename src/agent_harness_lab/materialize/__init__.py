@@ -1,8 +1,8 @@
 """Runtime Materialization 调度层 —— Adapter Protocol + Sandbox + dispatch。
 
-C3 范围:只有 LegacyAdapter(wrap agentconn.open_session,保 v0.2.0 行为等价)。
-LocalPathAdapter / GitRepoAdapter 留 C4-C5;runtime_source 写了但 adapter 不存在
-的 variant,workflow.preflight 阶段 hard fail (不到 dispatch)。
+当前范围:只有 LegacyAdapter(wrap agentconn.open_session,保 v0.2.0 行为等价)。
+LocalPathAdapter 留 C5, GitRepoAdapter 留 C6;runtime_source 写了但 adapter
+不存在的 variant,workflow.preflight 阶段 hard fail (不到 dispatch)。
 
 Protocol 签名采用 ctx 模式(spec §7 原 source/patch/run_id/variant_id 4-args
 偏离),让所有 adapter 共用 same signature:Legacy 不需要 source/patch,
@@ -24,8 +24,9 @@ class Sandbox:
     """一次 (variant, case) 跑时的隔离运行环境。
 
     Legacy 路径下没有物理 sandbox:type="legacy", path=None, metadata 带
-    connect 引用供 LegacyAdapter.start() 用。Materialized 路径(C4-C5)下
-    type="copy_dir" / "git_worktree",path 指 sandbox/<run_id>/<variant_id>/。
+    connect 引用供 LegacyAdapter.start() 用。Materialized 路径(local_path
+    C5 / git_repo C6 实现后)下 type="copy_dir" / "git_worktree",path 指
+    sandbox/<run_id>/<variant_id>/。
     """
 
     type: str                              # "legacy" | "copy_dir" | "git_worktree"
@@ -50,7 +51,8 @@ class MaterializeContext:
 class RuntimeAdapter(Protocol):
     """Materialize → Start → Teardown 三段管线的统一接口。
 
-    snapshot_fields 给 C4 snapshot persistence 用;C3 LegacyAdapter 返回 stub。
+    snapshot_fields 给 snapshot persistence 用,返 spec §2 schema 字段
+    (LegacyAdapter 返 §2.2 legacy_connect + connect_md_hash)。
     """
 
     def materialize(self, version: Version, ctx: MaterializeContext) -> Sandbox: ...
@@ -67,7 +69,7 @@ class RuntimeAdapter(Protocol):
 def adapter_for(version: Version) -> RuntimeAdapter:
     """按 version.runtime_source 决定用哪个 adapter。
 
-    C3:只支持 runtime_source=None (legacy)。runtime_source 写了 → 抛
+    当前只支持 runtime_source=None (legacy)。runtime_source 写了 → 抛
     NotImplementedError。但工作流的正常路径应该在 workflow.run_preflight
     阶段就 hard fail (见 workflow.preflight_runtime_path),不会真走到这里;
     本 raise 是 defensive,防 preflight bypass 的测试或未来代码路径。
@@ -78,5 +80,5 @@ def adapter_for(version: Version) -> RuntimeAdapter:
         return LegacyAdapter()
     raise NotImplementedError(
         f"版本 {version.version_id}:runtime_source={version.runtime_source!r} "
-        f"adapter 还没实现 (C3 只支持 legacy;local_path / git_repo 留 C4-C5)"
+        f"adapter 还没实现 (当前只支持 legacy;local_path 留 C5, git_repo 留 C6)"
     )

@@ -5,10 +5,13 @@ C3 重要约束:行为必须 100% 等价 v0.2.0。具体:
   ValueError("没有接入配置") —— v0.2.0 runner 写的同样错误信息。
 - start:直接调 agentconn.open_session(connect),跟 v0.2.0 一样。
 - teardown:no-op (没有物理 sandbox)。
-- snapshot_fields:C3 不做 snapshot persistence,返回 stub 满足 Protocol;
-  C4 真做 snapshot 时再扩展字段(spec §2.2 legacy schema)。
+- snapshot_fields(C4 实):返 spec §2.2 legacy schema —— type="legacy_connect"
+  + connect_md_hash(workspace 根 connect.md 的 sha256;不存在则空串)。
+  sandbox 参数允许 None(legacy snapshot 不依赖 materialize 成功)。
 """
 from __future__ import annotations
+
+import hashlib
 
 from agent_harness_lab.agentconn import AgentSession, open_session
 from agent_harness_lab.materialize import MaterializeContext, Sandbox
@@ -42,7 +45,22 @@ class LegacyAdapter:
         pass
 
     def snapshot_fields(self, version: Version, ctx: MaterializeContext,
-                        sandbox: Sandbox) -> dict:
-        # C3 不实现 snapshot persistence;返 stub 满足 Protocol。
-        # C4 真做 snapshot 时按 spec §2.2 扩展(legacy_connect + connect_md_hash)。
-        return {"type": "legacy_connect"}
+                        sandbox: Sandbox | None) -> dict:
+        """spec §2.2 legacy schema:type="legacy_connect" + connect_md_hash。
+
+        sandbox 允许 None —— snapshot 是 per variant 在 run 之前 build,不要求
+        materialize 成功。connect_md_hash 取 workspace 根 connect.md 内容
+        sha256;不存在时空串(variant 都有自带 connect 时合法)。
+        """
+        # workspace 根:experiments/<id>/ 的上两级
+        workspace_root = ctx.experiment_dir.parents[1]
+        connect_md = workspace_root / "connect.md"
+        if connect_md.exists():
+            digest = hashlib.sha256(connect_md.read_bytes()).hexdigest()
+            connect_md_hash = f"sha256:{digest}"
+        else:
+            connect_md_hash = ""
+        return {
+            "type": "legacy_connect",
+            "connect_md_hash": connect_md_hash,
+        }

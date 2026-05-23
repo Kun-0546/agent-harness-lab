@@ -1,9 +1,11 @@
 """LegacyAdapter:v0.2.0 兼容路径 wrap agentconn.open_session。
 
 覆盖 C3 行为:materialize / start / teardown 与 v0.2.0 等价 + dispatcher 选择。
+覆盖 C4 行为:snapshot_fields 真实计算 connect_md_hash(workspace connect.md sha256)。
 LegacyAdapter 必须保住 v0.2.0 行为细节(包括 '没有接入配置' 错误消息原文),
 现有 57 v0.2.0 legacy tests + e2e 仍全绿是关键 contract。
 """
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -97,16 +99,60 @@ class TestLegacyAdapterLifecycle(unittest.TestCase):
         sandbox = adapter.materialize(v, _make_ctx())
         adapter.teardown(sandbox)  # 不应抛错
 
-    def test_snapshot_fields_returns_legacy_stub(self):
-        """C3 不实现 snapshot persistence;snapshot_fields 返 legacy_connect stub
-        满足 Protocol。C4 真做 snapshot 时按 spec §2.2 扩展。
+    def test_snapshot_fields_returns_legacy_with_connect_md_hash(self):
+        """C4:type='legacy_connect' + connect_md_hash 是 workspace connect.md 的 sha256。"""
+        with tempfile.TemporaryDirectory() as root:
+            root_p = Path(root)
+            (root_p / "connect.md").write_text(
+                "# c\n\n## 类型\n进程内库\n\n## 配置\nm:f\n", encoding="utf-8")
+            exp_dir = root_p / "experiments" / "001-test"
+            exp_dir.mkdir(parents=True)
+            ctx = MaterializeContext(
+                run_id="r", experiment_dir=exp_dir,
+                fallback_connect=None, runtime_sources=[],
+            )
+            conn = Connect(path=Path("c.md"), conn_type="进程内库", config="m:f")
+            v = _make_version(connect=conn)
+            adapter = LegacyAdapter()
+            sandbox = adapter.materialize(v, ctx)
+            fields = adapter.snapshot_fields(v, ctx, sandbox)
+            self.assertEqual(fields["type"], "legacy_connect")
+            self.assertTrue(fields["connect_md_hash"].startswith("sha256:"))
+            # sha256 hex = 64 chars
+            self.assertEqual(len(fields["connect_md_hash"]), len("sha256:") + 64)
+
+    def test_snapshot_fields_handles_missing_connect_md(self):
+        """workspace 无 connect.md → connect_md_hash 空串
+        (variant 都自带 connect 时合法,不抛错)。
         """
-        conn = Connect(path=Path("c.md"), conn_type="进程内库", config="x")
-        v = _make_version(connect=conn)
-        adapter = LegacyAdapter()
-        sandbox = adapter.materialize(v, _make_ctx())
-        fields = adapter.snapshot_fields(v, _make_ctx(), sandbox)
-        self.assertEqual(fields, {"type": "legacy_connect"})
+        with tempfile.TemporaryDirectory() as root:
+            exp_dir = Path(root) / "experiments" / "001-test"
+            exp_dir.mkdir(parents=True)
+            ctx = MaterializeContext(
+                run_id="r", experiment_dir=exp_dir,
+                fallback_connect=None, runtime_sources=[],
+            )
+            conn = Connect(path=Path("c.md"), conn_type="进程内库", config="m:f")
+            v = _make_version(connect=conn)
+            adapter = LegacyAdapter()
+            sandbox = adapter.materialize(v, ctx)
+            fields = adapter.snapshot_fields(v, ctx, sandbox)
+            self.assertEqual(fields["type"], "legacy_connect")
+            self.assertEqual(fields["connect_md_hash"], "")
+
+    def test_snapshot_fields_accepts_sandbox_none(self):
+        """C4:sandbox 参数可为 None —— snapshot 写在跑之前,不依赖 materialize 成功。"""
+        with tempfile.TemporaryDirectory() as root:
+            exp_dir = Path(root) / "experiments" / "001-test"
+            exp_dir.mkdir(parents=True)
+            ctx = MaterializeContext(
+                run_id="r", experiment_dir=exp_dir,
+                fallback_connect=None, runtime_sources=[],
+            )
+            v = _make_version()
+            fields = LegacyAdapter().snapshot_fields(v, ctx, sandbox=None)
+            self.assertEqual(fields["type"], "legacy_connect")
+            self.assertEqual(fields["connect_md_hash"], "")
 
 
 class TestAdapterDispatcher(unittest.TestCase):
@@ -119,7 +165,7 @@ class TestAdapterDispatcher(unittest.TestCase):
         self.assertIsInstance(adapter, LegacyAdapter)
 
     def test_runtime_source_written_raises_not_implemented(self):
-        """version.runtime_source 写了 → NotImplementedError(C3 only legacy)。
+        """version.runtime_source 写了 → NotImplementedError(当前只支持 legacy)。
 
         正常路径在 workflow.preflight 已 hard fail;本测试是 defensive,
         防 preflight bypass 的代码路径无声跑到 dispatcher。
@@ -130,7 +176,8 @@ class TestAdapterDispatcher(unittest.TestCase):
         msg = str(ctx.exception)
         self.assertIn("V1", msg)
         self.assertIn("openmanus-main", msg)
-        self.assertIn("C4-C5", msg)
+        self.assertIn("local_path 留 C5", msg)
+        self.assertIn("git_repo 留 C6", msg)
 
 
 if __name__ == "__main__":
