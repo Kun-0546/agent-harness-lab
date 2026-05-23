@@ -5,6 +5,16 @@
 > 取代 v0.4 草稿。v0.3 的 §0–§5、§7(接入、评测、文件格式骨架)仍有效。
 > 日期:2026-05-18。这是执行方案,不是实现 —— 仍不写代码。
 
+> **⚠ 当前实现状态与产品定位（2026-05-21 升级）**
+>
+> **产品定位以 `product-definition.md` 为准。** Agent Harness Lab 是本项目的当前产品名；HDL / Harness Design Loop 是历史代号（见 `product-definition.md` §11）。
+>
+> **"Designer Agent" / "HDL 内置 Designer LLM" 已被取代。** v2-minimal 把本文 §4 / §8 里的 "Designer Agent" 这条收束为 **external coding agent authored workflow**——Lab 不调内置 Designer LLM 起草实验文件，那是 Claude Code / Cursor / Codex 等外层 coding agent 的活。本文里出现的 "Designer Agent" 一律按这个新抽象读，不要按原字面理解。
+>
+> **本文仍然有效的部分：** §1（四个锚点）、§3（authority matrix）、§5（escalation 规则）、§6（calibration）、§7（provenance schema）、§9（路线图 v1/v2/v2.5/v3/v4）——这些是长期产品架构的有效输入，被 `product-definition.md` 引用。
+>
+> 本文是**设计演进史 + 长期方向**；当前主线以 `product-definition.md` + `product-modes.md` + `runtime-materialization.md` 为准。代码层面以 `v2-minimal-spec.md` 为准。
+
 ---
 
 ## 1. 原则(承自 v0.4,不变)

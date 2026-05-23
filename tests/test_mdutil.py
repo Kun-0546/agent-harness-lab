@@ -1,7 +1,7 @@
 """mdutil 的单测 —— 占位符判断、区块切分、frontmatter。"""
 import unittest
 
-from harness_design_loop import mdutil
+from agent_harness_lab import mdutil
 
 
 class TestIsFilled(unittest.TestCase):

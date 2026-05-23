@@ -9,7 +9,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from harness_design_loop import mdutil
+from agent_harness_lab import mdutil
 
 
 @dataclass

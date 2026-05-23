@@ -1,6 +1,6 @@
-"""读一个实验的测试集。
+"""读一个实验的 cases。
 
-测试集 = experiments/<编号>/测试集/ 目录,一个 case 一个文件。
+cases = experiments/<编号>/cases/ 目录,一个 case 一个文件。
 一个 case 里装什么,由实验 program 声明的「对话模式」定。本模块先做「模拟」。
 格式见 docs/file-formats.md。
 """
@@ -9,8 +9,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from harness_design_loop import mdutil
-from harness_design_loop.program import parse_program
+from agent_harness_lab import mdutil
+from agent_harness_lab.program import parse_program
 
 
 @dataclass
@@ -56,14 +56,17 @@ def parse_sim_case(path: str | Path) -> TestCase:
 
 
 def load_testset(experiment_dir: str | Path) -> list[TestCase]:
-    """读一个实验的整套测试集。读法按实验 program 声明的「对话模式」分发。
+    """读一个实验的整套 cases。读法按实验 program 声明的「对话模式」分发。
 
     本期只实现「模拟」;回放 / 固定 抛 NotImplementedError。
     """
     experiment_dir = Path(experiment_dir)
-    testset_dir = experiment_dir / "测试集"
-    if not testset_dir.exists():
-        raise FileNotFoundError(f"实验没有 测试集/ 目录:{experiment_dir}")
+    cases_dir = experiment_dir / "cases"
+    if not cases_dir.exists():
+        if (experiment_dir / "测试集").exists():
+            raise FileNotFoundError(
+                f"发现旧目录 测试集/,请改名为 cases/(Phase 2 命名同步):{experiment_dir}")
+        raise FileNotFoundError(f"实验没有 cases/ 目录:{experiment_dir}")
 
     program_path = experiment_dir / "program.md"
     mode = ""
@@ -71,7 +74,7 @@ def load_testset(experiment_dir: str | Path) -> list[TestCase]:
         mode = parse_program(program_path).declarations.get("对话模式", "").strip()
 
     if not mdutil.is_filled(mode) or mode == "模拟":
-        return [parse_sim_case(p) for p in sorted(testset_dir.glob("*.md"))]
+        return [parse_sim_case(p) for p in sorted(cases_dir.glob("*.md"))]
     if mode in ("回放", "固定"):
-        raise NotImplementedError(f"对话模式「{mode}」的测试集读取还没写,本期先做模拟")
+        raise NotImplementedError(f"对话模式「{mode}」的 cases 读取还没写,本期先做模拟")
     raise ValueError(f"program 里对话模式「{mode}」识别不了(应为 模拟 / 回放 / 固定)")

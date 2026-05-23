@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from harness_design_loop import mdutil
+from agent_harness_lab import mdutil
 
 CONNECT_TYPES = ["进程内库", "外部命令行", "HTTP无状态", "HTTP有状态"]
 

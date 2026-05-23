@@ -1,4 +1,4 @@
-"""hdl init / new 生成的文件模板。"""
+"""ahl init / new 生成的文件模板。"""
 
 PROGRAM_TEMPLATE = """# 实验 {name} · program
 
@@ -48,7 +48,7 @@ GOAL_TEMPLATE = """# goal —— 总目标
 这一层内部怎么写(怎么 engineer),按你的 Goal Engineering 方法 —— 待补。>
 """
 
-SIMULATOR_TEMPLATE = """# 模拟器 —— 模拟模式下扮用户的那个 agent
+SIMULATOR_TEMPLATE = """# simulator —— 模拟模式下扮用户的那个 agent
 
 ## 人设
 <模拟器扮谁;例:一个 CEO,沟通直接、要数据、被说服前会追问>
@@ -59,3 +59,26 @@ SIMULATOR_TEMPLATE = """# 模拟器 —— 模拟模式下扮用户的那个 age
 ## 追问策略
 <怎么追问:盯没答透的点、适时换角度、什么时候收尾>
 """
+
+BRIEF_TEMPLATE = """# brief — {name}
+
+> 人写的实验意图(V2)。填好后让外层 coding agent(Claude Code / Cursor / Codex)
+> 据它起草 program / harnesses / cases / rubric / simulator,完了跑 ahl review。
+> AHL 自己不调模型起草。
+
+## 想优化什么
+<这个 agent,你想让它哪方面变好>
+
+## 验证什么改动
+<这次具体要试的那个改动>
+
+## 最在意什么
+<判好坏时你最看重的>
+
+## 不能牺牲什么
+<哪些方面无论如何不能退化 —— 红线>
+
+## 怎么比
+<对基线 / 线性迭代;拿不准就留空,默认对基线>
+"""
+

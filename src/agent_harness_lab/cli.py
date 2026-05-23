@@ -1,4 +1,4 @@
-"""harness-design-loop 命令行入口。
+"""Agent Harness Lab 命令行入口。
 
 这层只管:解析参数、把结果打印给用户、把活儿交给 workflow。
 run / score / compare 的编排逻辑在 workflow.py。
@@ -9,17 +9,17 @@ import argparse
 import sys
 from pathlib import Path
 
-from harness_design_loop import templates, workflow
-from harness_design_loop.connect import parse_connect
-from harness_design_loop.program import (
+from agent_harness_lab import templates, workflow
+from agent_harness_lab.connect import parse_connect
+from agent_harness_lab.program import (
     DECLARATION_STATUS,
     KNOWN_DECLARATIONS,
     parse_program,
 )
-from harness_design_loop.rubric import parse_rubric
-from harness_design_loop.simulator import parse_simulator
-from harness_design_loop.testset import load_testset
-from harness_design_loop.version import load_versions
+from agent_harness_lab.rubric import parse_rubric
+from agent_harness_lab.simulator import parse_simulator
+from agent_harness_lab.testset import load_testset
+from agent_harness_lab.version import load_versions
 
 
 def _experiments_dir() -> Path:
@@ -51,17 +51,24 @@ def cmd_init(args: argparse.Namespace) -> int:
     if not _experiments_dir().exists():
         _experiments_dir().mkdir()
         created.append("experiments/")
+    golden = root / "calibration" / "golden"
+    if not golden.exists():
+        golden.mkdir(parents=True)
+        created.append("calibration/golden/")
     print(f"初始化:{root}")
     for c in created:
         print(f"  + {c}")
-    print("  下一步:填 connect.md、goal.md;hdl new <实验名> 开第一个实验。")
+    print("  下一步:")
+    print("    1. 填 connect.md、goal.md")
+    print("    2. 开实验:ahl new <名字>(v1 人手写)或 ahl draft <名字>(v2,外层 agent 起草)")
+    print("    3. calibration/golden/ 放 golden case(对话 + 人判定;本期是约定,v2.5 用它校 judge)")
     return 0
 
 
 def cmd_connect(args: argparse.Namespace) -> int:
     path = Path.cwd() / "connect.md"
     if not path.exists():
-        print("当前目录没有 connect.md(先 hdl init)", file=sys.stderr)
+        print("当前目录没有 connect.md(先 ahl init)", file=sys.stderr)
         return 1
     c = parse_connect(path)
     print(f"接入配置:{path}")
@@ -89,17 +96,17 @@ def cmd_new(args: argparse.Namespace) -> int:
     (exp_dir / "program.md").write_text(
         templates.PROGRAM_TEMPLATE.replace("{name}", exp_name), encoding="utf-8")
     (exp_dir / "rubric.md").write_text(templates.RUBRIC_TEMPLATE, encoding="utf-8")
-    (exp_dir / "模拟器.md").write_text(templates.SIMULATOR_TEMPLATE, encoding="utf-8")
-    (exp_dir / "测试集").mkdir()
-    (exp_dir / "versions").mkdir()
+    (exp_dir / "simulator.md").write_text(templates.SIMULATOR_TEMPLATE, encoding="utf-8")
+    (exp_dir / "cases").mkdir()
+    (exp_dir / "harnesses").mkdir()
     print(f"建好实验:{exp_name}")
     print(f"  {exp_dir}")
-    print("    program.md   —— 实验指令(假设 + 声明)")
-    print("    rubric.md    —— 评分维度 + 权重")
-    print("    模拟器.md    —— 模拟模式下扮用户的 agent")
-    print("    测试集/      —— 放 case 文件")
-    print("    versions/    —— 放被测的版本文件")
-    print("  下一步:填 program.md、rubric.md、模拟器.md;往 测试集/、versions/ 加文件。")
+    print("    program.md     —— 实验指令(假设 + 声明)")
+    print("    rubric.md      —— 评分维度 + 权重")
+    print("    simulator.md   —— 模拟模式下扮用户的 agent")
+    print("    cases/         —— 放 case 文件")
+    print("    harnesses/     —— 放被测的 harness variant 文件")
+    print("  下一步:填 program.md、rubric.md、simulator.md;往 cases/、harnesses/ 加文件。")
     return 0
 
 
@@ -168,9 +175,9 @@ def cmd_cases(args: argparse.Namespace) -> int:
         print(str(e), file=sys.stderr)
         return 1
 
-    print(f"实验:{exp_dir.name}  测试集:{len(cases)} 个 case")
+    print(f"实验:{exp_dir.name}  cases:{len(cases)} 个")
     if not cases:
-        print("(测试集是空的——往 测试集/ 加 case 文件;格式见 docs/file-formats.md)")
+        print("(cases/ 是空的——往 cases/ 加 case 文件;格式见 docs/file-formats.md)")
         return 0
     print()
     total_problems = 0
@@ -244,9 +251,9 @@ def cmd_versions(args: argparse.Namespace) -> int:
         print(str(e), file=sys.stderr)
         return 1
 
-    print(f"实验:{exp_dir.name}  版本:{len(versions)} 个")
+    print(f"实验:{exp_dir.name}  harnesses:{len(versions)} 个")
     if not versions:
-        print("(versions/ 是空的——一个版本一个文件;格式见 docs/file-formats.md)")
+        print("(harnesses/ 是空的——一个 harness variant 一个文件;格式见 docs/file-formats.md)")
         return 0
     print()
     total_problems = 0
@@ -330,18 +337,98 @@ def cmd_compare(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_draft(args: argparse.Namespace) -> int:
+    """V2 入口:为外层 coding agent 开一个 authoring workspace。
+
+    AHL 不调模型起草实验 —— 那是外层 coding agent(Claude Code / Cursor /
+    Codex)的活,据 brief.md 起草 program / harnesses / cases / rubric /
+    simulator,完了走 ahl run / score / compare。AHL 这里只 scaffold:建实验
+    目录、brief.md 模板、空的 harnesses/ 和 cases/。幂等可重跑。
+    """
+    exp_dir = _find_experiment(args.name)
+    if exp_dir is None:
+        exp_name = f"{_next_number()}-{args.name}"
+        exp_dir = _experiments_dir() / exp_name
+        exp_dir.mkdir(parents=True)
+    else:
+        exp_name = exp_dir.name
+    brief_path = exp_dir / "brief.md"
+    new_brief = not brief_path.exists()
+    if new_brief:
+        brief_path.write_text(
+            templates.BRIEF_TEMPLATE.replace("{name}", exp_name), encoding="utf-8")
+    (exp_dir / "cases").mkdir(exist_ok=True)
+    (exp_dir / "harnesses").mkdir(exist_ok=True)
+
+    print(f"实验:{exp_name}")
+    print(f"  {exp_dir}")
+    print(f"    brief.md       —— 人写的实验意图({'已建模板,去填' if new_brief else '已在'})")
+    print(f"    harnesses/     —— 外层 agent 在此放 harness variant 文件")
+    print(f"    cases/         —— 外层 agent 在此放 case 文件")
+    print()
+    if (exp_dir / "program.md").exists():
+        print(f"  program.md 已起草 —— 下一步:ahl review {args.name}")
+    else:
+        print("  下一步:")
+        print(f"    1. 填好 brief.md(human-owned,外层 agent 不要改它)")
+        print(f"    2. 让外层 coding agent(Claude Code / Cursor / Codex)据 brief.md 起草:")
+        print(f"       program.md、harnesses/V*.md、cases/D*.md、rubric.md、simulator.md")
+        print(f"       agent 读 docs/agent-authoring-guide.md;格式以 docs/file-formats.md 为准")
+        print(f"    3. 跑 ahl review {args.name}  —— 出 review.md(可多次跑,缺什么标未起草)")
+        print(f"    4. 通过后:ahl run {args.name}")
+    return 0
+
+
+def cmd_review(args: argparse.Namespace) -> int:
+    """读实验里现有文件,出 review.md。
+
+    宽松 —— 不抛错。CLI summary 把四类信号都拉出来:
+    未起草 / 解析失败 / 未检查(依赖文件坏)/ 校验提醒(validate 问题)。
+    任一非空就不说「齐了」。
+    """
+    exp_dir = _find_experiment(args.experiment)
+    if exp_dir is None:
+        print(f"找不到实验:{args.experiment}", file=sys.stderr)
+        return 1
+    try:
+        result = workflow.review(exp_dir)
+    except workflow.WorkflowError as e:
+        print(str(e), file=sys.stderr)
+        return 1
+    print(f"review:{result.out_path}")
+    if result.missing:
+        print(f"  未起草:{'、'.join(result.missing)}")
+    if result.broken:
+        print(f"  解析失败:{'、'.join(result.broken)}")
+    if result.skipped:
+        print(f"  未检查(依赖文件有问题):{'、'.join(result.skipped)}")
+    if result.warnings:
+        print(f"  校验提醒:{len(result.warnings)} 处(详见 review.md);"
+              f"建议修完再跑 ahl run")
+    if not (result.missing or result.broken or result.skipped or result.warnings):
+        print(f"  齐了 —— 没问题就 ahl run {args.experiment}")
+    else:
+        print(f"  让外层 coding agent 据 brief.md + docs/agent-authoring-guide.md "
+              f"起草 / 修正,再跑 ahl review {args.experiment}")
+    return 0
+
+
 def cmd_simulator(args: argparse.Namespace) -> int:
     exp_dir = _find_experiment(args.experiment)
     if exp_dir is None:
         print(f"找不到实验:{args.experiment}", file=sys.stderr)
         return 1
-    path = exp_dir / "模拟器.md"
+    path = exp_dir / "simulator.md"
     if not path.exists():
-        print(f"实验里没有 模拟器.md:{exp_dir}", file=sys.stderr)
+        if (exp_dir / "模拟器.md").exists():
+            print(f"发现旧文件 模拟器.md,请改名为 simulator.md(Phase 2 命名同步):{exp_dir}",
+                  file=sys.stderr)
+            return 1
+        print(f"实验里没有 simulator.md:{exp_dir}", file=sys.stderr)
         return 1
     sim = parse_simulator(path)
     print(f"实验:{exp_dir.name}")
-    print(f"模拟器:{path}")
+    print(f"simulator:{path}")
     print()
     for label, val in (("人设", sim.persona), ("背景知识", sim.background),
                         ("追问策略", sim.strategy)):
@@ -362,10 +449,10 @@ def cmd_simulator(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="hdl",
-        description="AI 产品研究的实验循环。",
+        prog="ahl",
+        description="Agent Harness Lab：设计、测试和改进 agent runtime harness 的实验工作流。",
     )
-    sub = parser.add_subparsers(dest="command")
+    sub = parser.add_subparsers(dest="command", metavar="<command>")
 
     p_init = sub.add_parser("init", help="初始化工作目录(connect.md + goal.md + experiments/)")
     p_init.set_defaults(func=cmd_init)
@@ -373,7 +460,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_connect = sub.add_parser("connect", help="读接入配置 connect.md 并检查")
     p_connect.set_defaults(func=cmd_connect)
 
-    p_new = sub.add_parser("new", help="新建实验,生成 program.md / rubric.md 模板 + 测试集/ versions/")
+    p_new = sub.add_parser("new", help="新建实验,生成 program.md / rubric.md 模板 + cases/ harnesses/")
     p_new.add_argument("name", help="实验名,会建成 experiments/<编号-名字>/")
     p_new.set_defaults(func=cmd_new)
 
@@ -381,7 +468,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_show.add_argument("experiment", help="实验编号或名字")
     p_show.set_defaults(func=cmd_show)
 
-    p_cases = sub.add_parser("cases", help="读实验的测试集并检查")
+    p_cases = sub.add_parser("cases", help="读实验的 cases 并检查")
     p_cases.add_argument("experiment", help="实验编号或名字")
     p_cases.set_defaults(func=cmd_cases)
 
@@ -393,25 +480,47 @@ def build_parser() -> argparse.ArgumentParser:
     p_simulator.add_argument("experiment", help="实验编号或名字")
     p_simulator.set_defaults(func=cmd_simulator)
 
-    p_versions = sub.add_parser("versions", help="读实验的版本并检查")
-    p_versions.add_argument("experiment", help="实验编号或名字")
-    p_versions.set_defaults(func=cmd_versions)
+    p_harnesses = sub.add_parser("harnesses", help="读实验的 harnesses 并检查")
+    p_harnesses.add_argument("experiment", help="实验编号或名字")
+    p_harnesses.set_defaults(func=cmd_versions)
 
-    p_run = sub.add_parser("run", help="跑实验:每个版本过测试集,产出对话")
+    p_versions = sub.add_parser("versions", help=argparse.SUPPRESS)
+    p_versions.add_argument("experiment", nargs="?", help=argparse.SUPPRESS)
+    p_versions.set_defaults(func=cmd_versions_legacy_redirect)
+    # argparse 的 help=SUPPRESS 对 subparser 不彻底 —— 仍出现在 choice list 和描述里。
+    # 手动从 _choices_actions 移除,让 ahl --help 完全不显示 versions。
+    sub._choices_actions = [
+        a for a in sub._choices_actions if getattr(a, "dest", None) != "versions"
+    ]
+    if "versions" in sub.choices:
+        # 仍保留 sub.choices['versions'] 让 parse_args(['versions', ...]) 走 redirect
+        pass
+
+    p_run = sub.add_parser("run", help="跑实验:每个 harness variant 过 cases,产出对话")
     p_run.add_argument("experiment", help="实验编号或名字")
     p_run.add_argument("--llm", action="store_true",
-                       help="用 LLM 模拟器现生追问(先设 HDL_SIM_* 环境变量);默认用本地桩")
+                       help="用 LLM 模拟器现生追问(先设 AHL_SIM_* 环境变量);默认用本地桩")
     p_run.set_defaults(func=cmd_run)
 
     p_score = sub.add_parser("score", help="给最近一次 run 的对话按 rubric 打分")
     p_score.add_argument("experiment", help="实验编号或名字")
     p_score.add_argument("--llm", action="store_true",
-                         help="用 LLM Judge 真打分(先设 HDL_JUDGE_* 环境变量);默认用本地桩")
+                         help="用 LLM Judge 真打分(先设 AHL_JUDGE_* 环境变量);默认用本地桩")
     p_score.set_defaults(func=cmd_score)
 
-    p_compare = sub.add_parser("compare", help="把版本的分数放一起比")
+    p_compare = sub.add_parser("compare", help="把 harness variants 的分数放一起比")
     p_compare.add_argument("experiment", help="实验编号或名字")
     p_compare.set_defaults(func=cmd_compare)
+
+    p_draft = sub.add_parser("draft",
+                              help="为外层 coding agent 开一个 authoring workspace(V2):建实验目录 + brief.md")
+    p_draft.add_argument("name", help="实验名;建成 experiments/<编号-名字>/")
+    p_draft.set_defaults(func=cmd_draft)
+
+    p_review = sub.add_parser("review",
+                               help="读实验里现有文件出 review.md(宽松,缺什么标未起草;V2)")
+    p_review.add_argument("experiment", help="实验编号或名字")
+    p_review.set_defaults(func=cmd_review)
 
     return parser
 
@@ -426,3 +535,29 @@ def main(argv: list[str] | None = None) -> int:
         parser.print_help()
         return 0
     return args.func(args)
+
+
+def cmd_versions_legacy_redirect(args: argparse.Namespace) -> int:
+    """versions 子命令已改名为 harnesses。打印迁移提示后退出。
+
+    不做转发(避免双名长期共存),按 Phase 3 兼容策略直接退出。
+    """
+    exp = getattr(args, "experiment", None) or "<experiment>"
+    print("versions 子命令已改名为 harnesses,请用:", file=sys.stderr)
+    print(f"  ahl harnesses {exp}", file=sys.stderr)
+    return 1
+
+
+def hdl_legacy_redirect() -> int:
+    """旧 hdl 命令的迁移提示 —— Phase 3 已改名为 ahl(Agent Harness Lab)。
+
+    保留 entry point 是为了让旧脚本/文档调用 hdl 时拿到明确指引,而非
+    'command not found'。不做转发(避免双主命令长期共存),直接退出。
+    """
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
+    args_str = " ".join(sys.argv[1:]) if len(sys.argv) > 1 else "<子命令>"
+    print("hdl 命令已改名为 ahl(Agent Harness Lab)。请用:", file=sys.stderr)
+    print(f"  ahl {args_str}", file=sys.stderr)
+    return 1

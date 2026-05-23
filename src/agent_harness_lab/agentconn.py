@@ -18,7 +18,7 @@ import threading
 import urllib.error
 import urllib.request
 
-from harness_design_loop.connect import Connect
+from agent_harness_lab.connect import Connect
 
 
 class AgentSession:
@@ -77,7 +77,7 @@ def _extract_reply(data: dict) -> str:
 
 
 try:
-    _TURN_TIMEOUT = float(os.environ.get("HDL_AGENT_TIMEOUT", "600"))
+    _TURN_TIMEOUT = float(os.environ.get("AHL_AGENT_TIMEOUT", "600"))
 except ValueError:
     _TURN_TIMEOUT = 600.0
 
@@ -88,7 +88,7 @@ class _CliSession(AgentSession):
     stdout、stderr 各由一个后台线程持续读:
     - stdout 进队列,send() 等队列,超过 timeout 秒没等到就判卡死、杀进程、抛错。
     - stderr 持续 drain —— 不读会填满 pipe、卡死子进程;留最近几行做报错用。
-    timeout 默认 600 秒,可用环境变量 HDL_AGENT_TIMEOUT 改。
+    timeout 默认 600 秒,可用环境变量 AHL_AGENT_TIMEOUT 改。
     """
 
     def __init__(self, command: str, timeout: float = _TURN_TIMEOUT):

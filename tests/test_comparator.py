@@ -1,7 +1,7 @@
 """comparator 的单测 —— 三种对比方式、题目覆盖不一致。"""
 import unittest
 
-from harness_design_loop.comparator import compare_scores
+from agent_harness_lab.comparator import compare_scores
 
 
 def _mk(vid: str, cid: str, total: float) -> dict:

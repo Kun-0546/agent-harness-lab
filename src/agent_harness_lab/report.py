@@ -1,7 +1,7 @@
 """compare 报告 —— 把一次对比的结果拼成 markdown 文本。"""
 from __future__ import annotations
 
-from harness_design_loop.comparator import Comparison
+from agent_harness_lab.comparator import Comparison
 
 
 def build_compare_report(exp_name: str, score_file: str, grader: str,
@@ -14,7 +14,7 @@ def build_compare_report(exp_name: str, score_file: str, grader: str,
         f"对比方式:{comparison.mode}",
     ]
     if comparison.mode != "线性迭代":
-        lines.append(f"基线:{baseline_id or '(无 —— versions/ 里没标基线,只列总分)'}")
+        lines.append(f"基线:{baseline_id or '(无 —— harnesses/ 里没标基线,只列总分)'}")
     if not comparison.coverage_even:
         lines.append("")
         lines.append("⚠ 版本间题目覆盖不一致 —— 总分、差值只在共同题上算:"

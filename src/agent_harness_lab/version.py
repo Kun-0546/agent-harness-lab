@@ -1,17 +1,19 @@
-"""读一个实验的版本 —— 被测系统里摆出来对比的那几个 agent。
+"""读一个实验的 harness variants —— 被测系统里摆出来对比的几个 harness 设计。
 
-版本 = experiments/<编号>/versions/ 目录,一个版本一个文件。
+variants = experiments/<编号>/harnesses/ 目录,一个 variant 一个文件。
 其中一个标为基线(不动,当参照)。
-版本可以在「类型」「配置」段里写自己的接入方式;不写就用全局 connect.md。
+Variant 可以在「类型」「配置」段里写自己的接入方式;不写就用全局 connect.md。
 格式见 docs/file-formats.md。
+
+(注:本模块仍叫 version.py,Phase 3 跟包名一起整理。dataclass 名 Version 同。)
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
 
-from harness_design_loop import mdutil
-from harness_design_loop.connect import Connect
+from agent_harness_lab import mdutil
+from agent_harness_lab.connect import Connect
 
 _YES = {"是", "yes", "true", "y", "1", "基线"}
 
@@ -58,9 +60,12 @@ def parse_version(path: str | Path) -> Version:
 
 
 def load_versions(experiment_dir: str | Path) -> list[Version]:
-    """读一个实验的所有版本文件。"""
+    """读一个实验的所有 harness variant 文件。"""
     experiment_dir = Path(experiment_dir)
-    versions_dir = experiment_dir / "versions"
-    if not versions_dir.exists():
-        raise FileNotFoundError(f"实验没有 versions/ 目录:{experiment_dir}")
-    return [parse_version(p) for p in sorted(versions_dir.glob("*.md"))]
+    harnesses_dir = experiment_dir / "harnesses"
+    if not harnesses_dir.exists():
+        if (experiment_dir / "versions").exists():
+            raise FileNotFoundError(
+                f"发现旧目录 versions/,请改名为 harnesses/(Phase 2 命名同步):{experiment_dir}")
+        raise FileNotFoundError(f"实验没有 harnesses/ 目录:{experiment_dir}")
+    return [parse_version(p) for p in sorted(harnesses_dir.glob("*.md"))]
