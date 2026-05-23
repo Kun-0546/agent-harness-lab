@@ -14,6 +14,7 @@ from pathlib import Path
 
 from agent_harness_lab import mdutil
 from agent_harness_lab.connect import Connect
+from agent_harness_lab.patch import HarnessPatch, parse_patch
 
 _YES = {"是", "yes", "true", "y", "1", "基线"}
 
@@ -25,8 +26,11 @@ class Version:
     path: Path
     version_id: str = ""
     is_baseline: bool = False
-    what: str = ""                       # 这是什么(基线 / 改了什么)
-    connect: Connect | None = None       # 版本自带的接入;None = 用全局 connect.md
+    what: str = ""                          # 这是什么(基线 / 改了什么)
+    connect: Connect | None = None          # 版本自带的接入;None = 用全局 connect.md
+    # M1 新增:Runtime Materialization 字段;None = legacy 路径,走 connect.md
+    runtime_source: str | None = None       # frontmatter 字段,引用 runtime-sources.md 的 name
+    patch: HarnessPatch | None = None       # ## Patch 段;runtime_source 未写时为 None
 
     def validate(self) -> list[str]:
         """返回问题清单;空清单表示没问题。"""
@@ -37,6 +41,8 @@ class Version:
             problems.append("没写「这是什么」")
         if self.connect is not None:
             problems += [f"接入配置:{p}" for p in self.connect.validate()]
+        if self.runtime_source and self.patch is not None:
+            problems += [f"patch:{p}" for p in self.patch.validate()]
         return problems
 
 
@@ -56,6 +62,15 @@ def parse_version(path: str | Path) -> Version:
             conn_type=conn_type,
             config=sections.get("配置", "").strip(),
         )
+    # M1:runtime_source frontmatter 字段 + ## Patch 段。
+    # 不写 runtime_source 时 patch 段忽略(legacy 路径)。
+    rs = fields.get("runtime_source", "").strip()
+    if rs:
+        v.runtime_source = rs
+        patch_text = sections.get("Patch", "").strip()
+        # variant 在 experiments/<id>/harnesses/V*.md;experiment_dir = path.parent.parent
+        experiment_dir = path.parent.parent
+        v.patch = parse_patch(patch_text, experiment_dir)
     return v
 
 

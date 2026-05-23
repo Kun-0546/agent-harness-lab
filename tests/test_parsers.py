@@ -94,6 +94,9 @@ class TestVersion(_MdCase):
         self.assertEqual(v.version_id, "V1")
         self.assertTrue(v.is_baseline)
         self.assertIsNone(v.connect)
+        # test 5:legacy 路径下 runtime_source / patch 必须为 None
+        self.assertIsNone(v.runtime_source)
+        self.assertIsNone(v.patch)
 
     def test_parse_with_connect(self):
         v = parse_version(self._md(
@@ -102,10 +105,53 @@ class TestVersion(_MdCase):
         self.assertFalse(v.is_baseline)
         self.assertIsNotNone(v.connect)
         self.assertEqual(v.connect.conn_type, "外部命令行")
+        # legacy 路径(无 runtime_source) — Patch 段就算误写也忽略
+        self.assertIsNone(v.runtime_source)
 
     def test_validate_ok(self):
         v = parse_version(self._md("---\nid: V1\n基线: 是\n---\n## 这是什么\n基线。\n"))
         self.assertEqual(v.validate(), [])
+
+    def test_parse_with_runtime_source(self):
+        """test 4:V*.md 带 runtime_source frontmatter + ## Patch 段。
+
+        模拟 experiments/<id>/harnesses/V2.md 布局 —— patch source 文件相对
+        experiment_dir(path.parent.parent)解析。
+        """
+        exp_dir = Path(self._tmp.name) / "001-test"
+        harnesses_dir = exp_dir / "harnesses"
+        harnesses_dir.mkdir(parents=True)
+        patches_dir = exp_dir / "patches" / "V2"
+        patches_dir.mkdir(parents=True)
+        (patches_dir / "system.md").write_text("override prompt", encoding="utf-8")
+
+        v_path = harnesses_dir / "V2.md"
+        v_path.write_text(
+            "---\n"
+            "id: V2\n"
+            "基线: 否\n"
+            "runtime_source: openmanus-main\n"
+            "---\n"
+            "## 这是什么\n极简模式。\n\n"
+            "## Patch\n"
+            "files:\n"
+            "  - target: prompts/system.md\n"
+            "    source: patches/V2/system.md\n"
+            "\n"
+            "env:\n"
+            "  HARNESS_MAX_DEPTH: \"5\"\n"
+            "\n"
+            "start_command: python -m openmanus.agent\n",
+            encoding="utf-8")
+        v = parse_version(v_path)
+        self.assertEqual(v.version_id, "V2")
+        self.assertEqual(v.runtime_source, "openmanus-main")
+        self.assertIsNotNone(v.patch)
+        self.assertEqual(len(v.patch.files), 1)
+        self.assertEqual(v.patch.files[0].target_path, "prompts/system.md")
+        self.assertTrue(v.patch.files[0].hash.startswith("sha256:"))
+        self.assertEqual(v.patch.env["HARNESS_MAX_DEPTH"], "5")
+        self.assertEqual(v.patch.start_command, "python -m openmanus.agent")
 
 
 class TestConnect(_MdCase):
