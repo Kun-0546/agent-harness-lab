@@ -389,5 +389,68 @@ class TestLegacyDetection(unittest.TestCase):
             os.chdir(original)
 
 
+# ---- C3: Runtime Materialization preflight ----
+
+
+class TestRuntimeSourcePreflight(unittest.TestCase):
+    """C3:写了 runtime_source 但 materialize adapter 还没实现 → hard fail。
+
+    workflow.run 在 preflight 阶段早 catch,不到 runner;不假装能跑(spec §B.5 Q6)。
+    LocalPath / GitRepo adapter 留 C4-C5。
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name)
+        self.exp = self.root / "experiments" / "001-rs"
+        self.exp.mkdir(parents=True)
+        (self.exp / "program.md").write_text(
+            "# program\n\n## 假设\nrs preflight。\n\n## 声明\n"
+            "- 环境:无\n- 对话模式:模拟\n- 状态:重置\n"
+            "- 评分:本地桩\n- 运行模式:人评\n- 对比方式:对基线\n\n"
+            "## 留/丢规则\n人评。\n\n## 喊人规则\n人评。\n",
+            encoding="utf-8")
+        (self.exp / "rubric.md").write_text(
+            "## 准确\n权重: 1.0\n判甲。\n", encoding="utf-8")
+        (self.exp / "harnesses").mkdir()
+        (self.exp / "cases").mkdir()
+        (self.exp / "cases" / "D-01.md").write_text(
+            "---\nid: D-01\n---\n## 起始输入\nhi\n", encoding="utf-8")
+        # workspace root 声明一个 runtime source(给 cross-validation 用)
+        (self.root / "runtime-sources.md").write_text(
+            "## openmanus-main\n"
+            "type: git_repo\n"
+            "url: https://example.com/openmanus.git\n"
+            "ref: main\n",
+            encoding="utf-8")
+
+    def test_run_rejects_runtime_source_until_adapter_implemented(self):
+        """variant 写了 runtime_source(source 存在) → workflow.run 抛 WorkflowError。
+
+        消息含 'not implemented yet' / 'C4-C5' 等指引,run 不到 runner / sandbox。
+        """
+        # variant 引用 openmanus-main(在 runtime-sources.md 里),legal cross-ref,
+        # 但 C3 还没 materialize adapter,workflow 应 hard fail。
+        (self.exp / "harnesses" / "V1.md").write_text(
+            "---\n"
+            "id: V1\n"
+            "基线: 是\n"
+            "runtime_source: openmanus-main\n"
+            "---\n"
+            "## 这是什么\n极简模式。\n\n"
+            "## Patch\n\n"
+            "start_command: python -m foo\n",
+            encoding="utf-8")
+
+        with self.assertRaises(WorkflowError) as ctx:
+            run(self.exp, use_llm=False)
+        msg = str(ctx.exception)
+        self.assertIn("not implemented yet", msg)
+        self.assertIn("V1", msg)
+        self.assertIn("openmanus-main", msg)
+        self.assertIn("C4-C5", msg)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -16,9 +16,14 @@ from agent_harness_lab.brief import parse_brief
 from agent_harness_lab.comparator import compare_scores
 from agent_harness_lab.connect import parse_connect
 from agent_harness_lab.grader import llm_grader, score_run, stub_grader
+from agent_harness_lab.materialize import MaterializeContext
 from agent_harness_lab.program import Program, parse_program
 from agent_harness_lab.rubric import parse_rubric
 from agent_harness_lab.runner import run_experiment
+from agent_harness_lab.runtime_source import (
+    parse_runtime_sources,
+    validate_variant_source_refs,
+)
 from agent_harness_lab.simulator import (
     make_llm_simulator,
     parse_simulator,
@@ -124,7 +129,7 @@ def run_preflight(program: Program, versions: list[Version],
                   cases: list[TestCase]) -> list[str]:
     """run 前的聚合校验。返回带来源标注的问题清单;空清单 = 可以跑。
 
-    把 ahl show / versions / cases 各自能查到的问题,在跑之前一次性拦下。
+    把 ahl show / harnesses / cases 各自能查到的问题,在跑之前一次性拦下。
     最典型的是 case 段名写错(「## 初始输入」而非「## 起始输入」),起始输入
     解析成空串,run 不报错、直接把空输入发给 agent。program 没填、版本缺
     「这是什么」、基线数量不对同理 —— show 里看得到的,run 不该绕过。
@@ -143,6 +148,13 @@ def run(exp_dir: Path, use_llm: bool) -> RunResult:
     """跑实验:加载 → 校验 → 每个 harness variant 过 cases → 存对话。
 
     program / 版本 / case / 基线数量 / 接入配置 任一不过,都抛 WorkflowError。
+
+    C3 加 Runtime Materialization preflight:
+    - parse workspace 根的 runtime-sources.md (不存在返回空 list)
+    - cross-validate variant.runtime_source 引用是否都在 sources 里
+    - C3 只支持 legacy (无 runtime_source);写了 runtime_source 的 variant
+      hard fail("adapter 还没实现",留 C4-C5)
+    - 构造 MaterializeContext 传给 runner;runner 通过 adapter dispatch
     """
     program_path = exp_dir / "program.md"
     if not program_path.exists():
@@ -156,15 +168,46 @@ def run(exp_dir: Path, use_llm: bool) -> RunResult:
     problems = run_preflight(program, versions, cases)
     if problems:
         raise WorkflowError(
-            "跑不了,先修下面的问题(ahl show / versions / cases 可单独查):\n  - "
+            "跑不了,先修下面的问题(ahl show / harnesses / cases 可单独查):\n  - "
             + "\n  - ".join(problems))
 
     # 接入:版本自带的优先;没有就回退工作区根的 connect.md。
     # connect.md 在 project root,从 exp_dir 反推(experiments/<编号>/ 的上两级),
     # 不靠当前 shell 在哪。
-    connect_path = exp_dir.parents[1] / "connect.md"
+    workspace_root = exp_dir.parents[1]
+    connect_path = workspace_root / "connect.md"
     connect = parse_connect(connect_path) if connect_path.exists() else None
-    needs_global = [v.version_id for v in versions if v.connect is None]
+
+    # === C3:Runtime Materialization preflight ===
+    # parse 错误(unknown type / duplicate / unknown field)由 _safe_call 翻成
+    # WorkflowError "runtime-sources.md 解析失败:..."
+    sources_path = workspace_root / "runtime-sources.md"
+    runtime_sources = _safe_call(
+        "runtime-sources.md", parse_runtime_sources, sources_path)
+
+    # variant.runtime_source 引用必须在 sources 里(legacy None 跳过)
+    ref_problems = validate_variant_source_refs(
+        [(v.version_id, v.runtime_source) for v in versions],
+        runtime_sources,
+    )
+    if ref_problems:
+        raise WorkflowError(
+            "runtime_source 引用有问题:\n  - " + "\n  - ".join(ref_problems))
+
+    # C3 只支持 legacy(无 runtime_source);写了的 → hard fail
+    unsupported = [
+        f"版本 {v.version_id}:写了 runtime_source={v.runtime_source!r},"
+        f"但 materialize adapter 还没实现 (留 C4-C5;当前 C3 只支持 legacy)"
+        for v in versions if v.runtime_source is not None
+    ]
+    if unsupported:
+        raise WorkflowError(
+            "runtime_source path not implemented yet:\n  - "
+            + "\n  - ".join(unsupported))
+
+    # Legacy connect fallback 校验:无 runtime_source + 无 variant.connect → 要全局 connect.md
+    needs_global = [v.version_id for v in versions
+                    if v.connect is None and v.runtime_source is None]
     if needs_global:
         if connect is None:
             raise WorkflowError(
@@ -198,11 +241,20 @@ def run(exp_dir: Path, use_llm: bool) -> RunResult:
     # 这行得在 run_experiment 之前打 —— 它后面紧跟 runner 现打的逐条进度
     print(f"实验:{exp_dir.name}  {len(versions)} 版本 × {len(cases)} case,"
           f"多轮跑({sim_name})")
-    runs = run_experiment(connect, versions, cases, simulator)
+
+    # C3:构造 ctx 传给 runner;adapter dispatch 在 runner 里。
+    run_id = f"run-{time.strftime('%Y%m%d-%H%M%S')}"
+    ctx = MaterializeContext(
+        run_id=run_id,
+        experiment_dir=exp_dir,
+        fallback_connect=connect,
+        runtime_sources=runtime_sources,
+    )
+    runs = run_experiment(versions, cases, simulator, ctx)
 
     results_dir = exp_dir / "results"
     results_dir.mkdir(exist_ok=True)
-    out_path = results_dir / f"run-{time.strftime('%Y%m%d-%H%M%S')}.json"
+    out_path = results_dir / f"{run_id}.json"
     out_path.write_text(
         json.dumps([r.__dict__ for r in runs], ensure_ascii=False, indent=2),
         encoding="utf-8")

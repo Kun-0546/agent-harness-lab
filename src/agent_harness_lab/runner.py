@@ -1,16 +1,22 @@
 """跑 —— 让被测 agent 过一遍测试集,产出多轮对话。
 
-接入方式(怎么连 agent)由 connect 配置定,见 agentconn.py。
+C3 改造:接入方式不再直接读 connect,改为 adapter dispatch。
+- 每个 (variant, case):adapter.materialize → start → run session loop → teardown
+- LegacyAdapter (v0.2.0 兼容路径) 内部仍调 agentconn.open_session,行为等价
+- materialized adapter (local_path / git_repo) 留 C4-C5
+
 turn 0 发起始输入,之后模拟器现生用户话,到 max_turns 或模拟器收尾。
-真 agent 的逐轮超时、按版本起不同环境,随后做。
 """
 from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from agent_harness_lab.agentconn import open_session
-from agent_harness_lab.connect import Connect
+from agent_harness_lab.agentconn import AgentSession
+from agent_harness_lab.materialize import (
+    MaterializeContext,
+    adapter_for,
+)
 from agent_harness_lab.testset import TestCase
 from agent_harness_lab.version import Version
 
@@ -28,10 +34,12 @@ class CaseRun:
     error: str = ""
 
 
-def run_agent_session(connect: Connect, opening: str, simulator: Simulator,
+def run_agent_session(session: AgentSession, opening: str, simulator: Simulator,
                       max_turns: int) -> list:
-    """开一个 agent 会话,多轮跑,返回 transcript。"""
-    session = open_session(connect)
+    """跑 session loop:session 必须已经 open;close 在本函数 finally 调。
+
+    C3 签名变化:不再接 Connect,改接已建好的 AgentSession (来自 adapter.start)。
+    """
     transcript: list = []
     try:
         user_turn: str | None = opening
@@ -46,27 +54,35 @@ def run_agent_session(connect: Connect, opening: str, simulator: Simulator,
     return transcript
 
 
-def run_experiment(connect: Connect | None, versions: list[Version],
-                   cases: list[TestCase], simulator: Simulator) -> list[CaseRun]:
-    """每个版本过一遍测试集(多轮)。每跑完一个 case 打一行进度。
+def run_experiment(versions: list[Version], cases: list[TestCase],
+                   simulator: Simulator,
+                   ctx: MaterializeContext) -> list[CaseRun]:
+    """每个 (variant, case) 起 sandbox 跑;adapter 处理 connect / materialize 细节。
 
-    每个版本用自己的接入(version.connect);没有就回退到全局 connect。
+    C3:adapter_for(v) 只返回 LegacyAdapter (workflow.preflight 已 hard fail
+    runtime_source 写了但 adapter 没实现的 variant)。
+
+    一个 case 的 exception (materialize 失败、start 失败、session 内 exception)
+    都 catch 翻为 CaseRun.error,继续下一个 case —— 保 v0.2.0 行为等价。
+    spec §B.5 Q6 "hard fail" 留给 materialized adapter (C4-C5);在那时,
+    materialized adapter 在 preflight 抛 WorkflowError 早 fail,不到 runner。
     """
     runs: list[CaseRun] = []
     total = len(versions) * len(cases)
     done = 0
     for v in versions:
-        v_connect = v.connect or connect
+        adapter = adapter_for(v)
         for c in cases:
             done += 1
             print(f"  [{done}/{total}] {v.version_id} / {c.case_id} …", flush=True)
-            if v_connect is None:
-                runs.append(CaseRun(v.version_id, c.case_id, error="没有接入配置"))
-                print(f"  [{done}/{total}] {v.version_id} / {c.case_id} ✗ 没有接入配置",
-                      flush=True)
-                continue
             try:
-                tr = run_agent_session(v_connect, c.opening, simulator, c.max_turns or 8)
+                sandbox = adapter.materialize(v, ctx)
+                try:
+                    session = adapter.start(sandbox)
+                    tr = run_agent_session(session, c.opening, simulator,
+                                            c.max_turns or 8)
+                finally:
+                    adapter.teardown(sandbox)
                 runs.append(CaseRun(v.version_id, c.case_id, transcript=tr))
                 print(f"  [{done}/{total}] {v.version_id} / {c.case_id} ✓ {len(tr)} 轮",
                       flush=True)
