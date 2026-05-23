@@ -1,10 +1,11 @@
-# Phase 1-3 总结:HDL → Agent Harness Lab 重命名线收口
+# Agent Harness Lab v0.2.0 Release 总结(Phase 1-4:HDL → Agent Harness Lab 重命名线收口)
 
-> 日期:2026-05-21 启动 → 2026-05-22 全部通过(Checkpoint A/A2/B/C/C2 五道关卡)
-> 项目根:`<workspace>/projects/harness-design-loop/`
-> 分支:`v2-agent-drafted-lab`(<workspace>);origin 仓库:`Kun-0546/harness-design-loop`
-> Distribution:`agent-harness-lab` v0.1.0
-> Status:**Phase 1-3 通过,重命名线收口**;暂不进入 materialization / Auto / approval gates 实现
+> 日期:2026-05-21 启动 → 2026-05-22 v0.2.0 release 完成(Checkpoint A/A2/B/C/C2 + Phase 4 release/rename)
+> 项目根:`<workspace>/projects/agent-harness-lab/`(已从 `harness-design-loop/` rename)
+> 分支:`main`(已 merge v2-agent-drafted-lab);origin 仓库:`Kun-0546/agent-harness-lab` (PRIVATE)
+> Distribution:`agent-harness-lab` v0.1.0(package version,与 release tag v0.2.0 分开)
+> Status:**v0.2.0 release 完成,重命名线收口**;暂不进入 materialization / Auto / approval gates 实现
+> 本文档原名 `phase-1-to-3-summary.md`,Phase 4 收口后改名 `release-v0.2.0-summary.md`,完整覆盖 Phase 1-4。
 
 ---
 
@@ -243,3 +244,72 @@ Phase 1-3 全部通过,Agent Harness Lab 重命名线收口。
 - 进入下一阶段(materialization spec 推进或别的方向)
 
 按 Kun 明确约束,本轮收口不再顺手加新功能。
+
+---
+
+## 12. Phase 4:Release v0.2.0 + 三层 Rename(2026-05-22 收尾)
+
+Phase 3 cleanup 通过(Checkpoint C2)后,本阶段做完命名升级线的全部 release 收口工作。
+
+### 12.1 2 个 wording fix(从 §9.1 移入,已收)
+
+Phase 3 收口时记为"留作后续"的 2 个非阻塞 wording fix,本阶段顺手收完:
+
+- `ahl --help` 顶部:`"AI 产品研究的实验循环。"` → `"Agent Harness Lab:设计、测试和改进 agent runtime harness 的实验工作流。"`
+- `compare` help:`"把版本的分数放一起比"` → `"把 harness variants 的分数放一起比"`
+
+### 12.2 分主题 4-commit 切分 → push v2-agent-drafted-lab
+
+按主题分 4 个 commit,by-file 粒度切分(cli.py / workflow.py 等核心文件横跨多 phase,git add -p 不可用,文件按主要 phase 归属):
+
+- `02eef5e` docs: define Agent Harness Lab product model (Phase 1/1.5 docs)
+- `8faee5c` rename experiment artifacts to harnesses and cases (Phase 2 docs/examples)
+- `bab62f9` rename package and CLI to Agent Harness Lab (Phase 3 src/tests/README;含 staged rename 19 个 src 文件)
+- `ad54bd2` docs: finalize Agent Harness Lab handoff (本文档进 repo)
+
+`git push -u origin v2-agent-drafted-lab` 成功(新建 origin 分支)。
+
+### 12.3 Merge v2 → main + Release tags
+
+- `git merge --no-ff origin/v2-agent-drafted-lab` 无 conflict,生成 merge commit `886a7cc`
+- 全套验证(compileall + pytest 57/57 + 4 smoke 全过):`ahl --help` 显示新文案、`ahl harnesses` smoke、`ahl versions` legacy redirect、`hdl` legacy redirect
+- `git push origin main` 推 34 commits(首次公开 v0.1.0 + v0.2.0 完整历史到 origin/main;之前 origin/main HEAD 仅 `56b2891` 远古状态)
+- `git tag -a v0.2.0 -m "v0.2.0: rename to Agent Harness Lab"` annotated tag sha `5c6eb70`,指向 merge commit `886a7cc`
+- `git push origin v0.1.0 v0.2.0` 双 tag 同步上去(v0.1.0 也是首次到 origin)
+
+### 12.4 三层 Rename(GitHub repo + remote URL + local dir)
+
+发现 Phase 3 改动只覆盖 Python 包名/CLI/distribution name,但 GitHub 仓库名、git remote URL、local 项目目录仍是旧名。本阶段把这三层也对齐到新名:
+
+1. `gh repo rename agent-harness-lab` → GitHub repo 改为 `Kun-0546/agent-harness-lab`(仓库仍 PRIVATE)
+2. `git remote set-url origin https://github.com/Kun-0546/agent-harness-lab.git` → local remote 指新 URL
+3. `mv <workspace>/projects/harness-design-loop <workspace>/projects/agent-harness-lab` + `pip install -e .` 重装 → local 目录 + pip editable link 同步
+
+GitHub 自动 redirect 旧 URL,所以已存的 PR/issue/commit 链接仍可访问。Fork 仓库(如有)不会自动改名,所有者需要自行 rename。
+
+### 12.5 Windows mv lock 诊断(小插曲,留作经验)
+
+第一次 mv 失败"Access denied"。下载 Sysinternals `handle64.exe` 诊断:发现 `explorer.exe` 进程(PID 20740)持有 `harness-design-loop\temp\` 目录两个 file handle(用户在 File Explorer 看了 bundle 文件未关窗口)。关 Explorer 窗口后 mv 一次成功。
+
+经验:**Windows directory rename 对 OS-level handle lock 极敏感**(file/dir handle,不只是 process cwd),`PowerShell Rename-Item` 也会被 lock 挡下。排查工具 `Sysinternals handle.exe`(下载 `https://download.sysinternals.com/files/Handle.zip`,跑 `handle.exe -accepteula <path-substring>`)。
+
+### 12.6 收尾 cleanup
+
+- 清理 `src/harness_design_loop.egg-info/`(Phase 3 之前的旧 pip metadata 残留,pip 不再引用)
+- 本文档从 `phase-1-to-3-summary.md` 改名 `release-v0.2.0-summary.md`,加 Phase 4 章节,把 release 完整覆盖
+
+---
+
+## 13. v0.2.0 Release 收口
+
+至此 Agent Harness Lab 重命名线 v0.2.0 release 全线收口:
+
+- **代码**:Python 包 `agent_harness_lab` / CLI `ahl` / 环境变量 `AHL_*` / 实验目录 `harnesses` `cases` / 实验文件 `simulator.md`
+- **打包**:distribution name `agent-harness-lab`,editable install 指向新 local path
+- **仓库**:GitHub `Kun-0546/agent-harness-lab` (PRIVATE),local `<workspace>/projects/agent-harness-lab/`
+- **历史**:main 分支 `886a7cc` 含完整 Phase 1-4 工作 + 5 个 Checkpoint,v0.1.0/v0.2.0 tags 同步 push origin
+- **兼容**:所有旧名都做 legacy redirect 报错指向新名(不 fallback、不 migrate)
+
+**Repo 仍 PRIVATE**(未来 Kun 决定要不要 public:`gh repo edit --visibility public`)。
+
+按 Kun 明确约束,**不进入 materialization / Auto / approval gates 实现** — 那是下一阶段单独启动的工作。
