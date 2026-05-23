@@ -389,14 +389,14 @@ class TestLegacyDetection(unittest.TestCase):
             os.chdir(original)
 
 
-# ---- C3: Runtime Materialization preflight ----
+# ---- Runtime Materialization preflight ----
 
 
 class TestRuntimeSourcePreflight(unittest.TestCase):
-    """C3:写了 runtime_source 但 materialize adapter 还没实现 → hard fail。
+    """写了 runtime_source 但 materialize adapter 还没实现 → hard fail。
 
     workflow.run 在 preflight 阶段早 catch,不到 runner;不假装能跑(spec §B.5 Q6)。
-    LocalPath / GitRepo adapter 留 C4-C5。
+    LocalPathAdapter 留 C5, GitRepoAdapter 留 C6。
     """
 
     def setUp(self) -> None:
@@ -428,10 +428,11 @@ class TestRuntimeSourcePreflight(unittest.TestCase):
     def test_run_rejects_runtime_source_until_adapter_implemented(self):
         """variant 写了 runtime_source(source 存在) → workflow.run 抛 WorkflowError。
 
-        消息含 'not implemented yet' / 'C4-C5' 等指引,run 不到 runner / sandbox。
+        消息含 'not implemented yet' / 'local_path 留 C5' / 'git_repo 留 C6'
+        等指引,run 不到 runner / sandbox。
         """
         # variant 引用 openmanus-main(在 runtime-sources.md 里),legal cross-ref,
-        # 但 C3 还没 materialize adapter,workflow 应 hard fail。
+        # 但当前还没 materialize adapter,workflow 应 hard fail。
         (self.exp / "harnesses" / "V1.md").write_text(
             "---\n"
             "id: V1\n"

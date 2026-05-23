@@ -117,7 +117,8 @@ def validate_variant_source_refs(
     variant_refs 是 (variant_id, runtime_source_ref) 对的列表。
     ref 为 None 时跳过(legacy);ref 非 None 但不在 sources → 报问题。
 
-    返回问题清单;空清单 = 没问题。此函数不集成到 workflow.run(C3 才整合)。
+    返回问题清单;空清单 = 没问题。workflow.run 在 preflight 阶段调用此函数
+    cross-validate。
     """
     available = {s.name for s in sources}
     problems: list[str] = []

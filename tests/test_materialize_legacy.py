@@ -1,9 +1,9 @@
 """LegacyAdapter:v0.2.0 兼容路径 wrap agentconn.open_session。
 
-覆盖 C3 行为:materialize / start / teardown 与 v0.2.0 等价 + dispatcher 选择。
-覆盖 C4 行为:snapshot_fields 真实计算 connect_md_hash(workspace connect.md sha256)。
+覆盖:materialize / start / teardown 与 v0.2.0 等价 + dispatcher 选择 +
+snapshot_fields 真实计算 connect_md_hash(workspace connect.md sha256)。
 LegacyAdapter 必须保住 v0.2.0 行为细节(包括 '没有接入配置' 错误消息原文),
-现有 57 v0.2.0 legacy tests + e2e 仍全绿是关键 contract。
+v0.2.0 legacy tests + e2e 仍全绿是关键 contract。
 """
 import tempfile
 import unittest

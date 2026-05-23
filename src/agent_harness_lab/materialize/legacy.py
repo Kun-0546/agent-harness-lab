@@ -1,11 +1,11 @@
 """LegacyAdapter —— v0.2.0 兼容路径,wrap agentconn.open_session。
 
-C3 重要约束:行为必须 100% 等价 v0.2.0。具体:
+重要约束:行为必须 100% 等价 v0.2.0。具体:
 - materialize:no-op,只构造 sandbox 带 connect 引用。缺 connect 时抛
   ValueError("没有接入配置") —— v0.2.0 runner 写的同样错误信息。
 - start:直接调 agentconn.open_session(connect),跟 v0.2.0 一样。
 - teardown:no-op (没有物理 sandbox)。
-- snapshot_fields(C4 实):返 spec §2.2 legacy schema —— type="legacy_connect"
+- snapshot_fields:返 spec §2.2 legacy schema —— type="legacy_connect"
   + connect_md_hash(workspace 根 connect.md 的 sha256;不存在则空串)。
   sandbox 参数允许 None(legacy snapshot 不依赖 materialize 成功)。
 """
