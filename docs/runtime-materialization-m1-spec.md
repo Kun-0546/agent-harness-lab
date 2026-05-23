@@ -75,13 +75,17 @@ runtime_source: openmanus-main
 极简模式的 system prompt。
 
 ## Patch
-- prompt: prompts/system.md ← patches/V2/system.md
-- config: config/tools.yaml ← patches/V2/tools.yaml
-- env:
-    HARNESS_MAX_DEPTH: 5
 
-## 启动
-command: python -m openmanus.agent
+files:
+  - target: prompts/system.md
+    source: patches/V2/system.md
+  - target: config/tools.yaml
+    source: patches/V2/tools.yaml
+
+env:
+  HARNESS_MAX_DEPTH: "5"
+
+start_command: python -m openmanus.agent
 ```
 
 **约束**:
@@ -89,16 +93,12 @@ command: python -m openmanus.agent
 - **`runtime_source:` 是 frontmatter 可选字段**
   - 不写 → variant 走 legacy(用 connect.md + agentconn)
   - 写了但 source 名不在 `runtime-sources.md` → 抛 `WorkflowError`
-- **`## Patch` 段**(仅当 `runtime_source` 写了才解析;否则忽略):
-  - 文件替换:`- <logical_name>: <target_path> ← <patch_file>`
-    - `<logical_name>`:逻辑标签(human-friendly,不参与执行)
-    - `<target_path>`:相对 source root 的目标位置(将被 patch 覆盖)
-    - `<patch_file>`:相对 experiment 根的 patch 内容路径(通常 `patches/<variant_id>/`)
-    - 分隔符 `←`(U+2190)。Windows 下也可输入(`Alt+8592` / 复制粘贴)
-  - 环境:`- env:` + 缩进的 YAML 风格 key:value
-- **`## 启动` 段**(仅当 `runtime_source` 写了;否则忽略):
-  - `command:` 覆盖 source 默认启动命令
-  - 不写 → 抛错"未指定启动命令"(M1 不假设默认命令)
+- **`## Patch` 段**(仅当 `runtime_source` 写了才解析;否则忽略),YAML-like 结构:
+  - `files:` 列表,每项含:
+    - `target:` 相对 source root 的目标位置(将被 patch 覆盖)
+    - `source:` 相对 experiment 根的 patch 内容路径(通常 `patches/<variant_id>/`)
+  - `env:` map,key:value 形式注入环境变量(value 用字符串避免类型歧义)
+  - `start_command:` 覆盖 source 默认启动命令(必填;M1 不假设默认命令)
 - **v1 字段 `类型` / `配置` 段**:仅当 `runtime_source` 不写时按 v1 解析(legacy 路径)
 
 **patches 文件存放**:`experiments/<id>/patches/<variant_id>/<filename>`。
@@ -136,8 +136,8 @@ command: python -m openmanus.agent
 
   "harness_patch": {
     "applied": [
-      {"target_path": "prompts/system.md", "patch_file": "patches/V2/system.md", "hash": "sha256:..."},
-      {"target_path": "config/tools.yaml", "patch_file": "patches/V2/tools.yaml", "hash": "sha256:..."}
+      {"target_path": "prompts/system.md", "source_path": "patches/V2/system.md", "hash": "sha256:..."},
+      {"target_path": "config/tools.yaml", "source_path": "patches/V2/tools.yaml", "hash": "sha256:..."}
     ],
     "env": {"HARNESS_MAX_DEPTH": "5"},
     "start_command": "python -m openmanus.agent",
@@ -336,7 +336,6 @@ class RuntimeSource:
 
 @dataclass
 class PatchFile:
-    logical_name: str                              # human label
     target_path: str                               # 相对 source root
     source_path: Path                              # patch 内容绝对路径
     hash: str                                      # sha256:...
@@ -387,7 +386,7 @@ class RuntimeSnapshot:
 
 ## 8. 文件影响面
 
-### 8.1 新文件(13 个)
+### 8.1 新文件(14 个)
 
 | 路径 | 作用 |
 |------|------|
@@ -406,7 +405,7 @@ class RuntimeSnapshot:
 | `tests/test_snapshot.py` | RuntimeSnapshot 序列化 |
 | `tests/test_e2e_materialize.py` | git_repo × 2 variant × 1 case 端到端 |
 
-### 8.2 改动文件(7 个)
+### 8.2 改动文件(8 个)
 
 | 路径 | 改动 |
 |------|------|
@@ -415,7 +414,7 @@ class RuntimeSnapshot:
 | `src/agent_harness_lab/workflow.py` | `run()` 加 4 步:resolve source → materialize → snapshot → start → run → teardown |
 | `src/agent_harness_lab/runner.py` | 接受 `AgentSession`(来自 adapter.start),不再直接拿 connect |
 | `src/agent_harness_lab/cli.py` | 加 `--cleanup-sandboxes` flag 到 `ahl run` |
-| `docs/file-formats.md` | 加 `runtime-sources.md` 格式 + `V*.md` 的 `runtime_source` / `## Patch` / `## 启动` 段 |
+| `docs/file-formats.md` | 加 `runtime-sources.md` 格式 + `V*.md` 的 `runtime_source` 字段 + `## Patch` 段(含 files / env / start_command) |
 | `docs/runtime-materialization.md` | §8 M1 标"已实现";§3 表的 local_path/git_repo 行加状态标 |
 | `docs/product-definition.md` | §8 "下一阶段核心" 加 "M1 已实现" 状态 |
 
@@ -434,7 +433,7 @@ class RuntimeSnapshot:
 1. **C3 之后必须 57/57 全绿** —— 这是 legacy 完全等价的硬验证。绿了再进 C4
 2. **legacy path 也写 snapshot.json** —— 不是 v0.2.0 行为的最小增量,这是 spec 固定;tests 18 验证
 3. **`runtime_source` 不写 = legacy** —— parser 不抛错,默认走老路
-4. **`## Patch` / `## 启动` 段在 legacy 路径下被忽略** —— 不解析就不解析,不抛错
+4. **`## Patch` 段在 legacy 路径下被忽略** —— 不解析就不解析,不抛错
 5. **sandbox 默认 keep** —— `--cleanup-sandboxes` 是 opt-in
 6. **物理 sandbox vs snapshot metadata 分目录**
    - 物理:`sandbox/<run_id>/<variant_id>/`
