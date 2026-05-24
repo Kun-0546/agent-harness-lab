@@ -16,7 +16,9 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
+import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -77,7 +79,10 @@ def parse_patch(text: str, experiment_dir: Path) -> HarnessPatch:
             return
         target = current_file.get("target", "")
         source_rel = current_file.get("source", "")
-        source_abs = (experiment_dir / source_rel) if source_rel else Path()
+        if source_rel:
+            source_abs = _safe_source_path(experiment_dir, source_rel)
+        else:
+            source_abs = Path()
         pf = PatchFile(target_path=target, source_path=source_abs)
         pf.hash = pf.compute_hash()
         patch.files.append(pf)
@@ -127,3 +132,77 @@ def parse_patch(text: str, experiment_dir: Path) -> HarnessPatch:
                     patch.env[m.group(1)] = m.group(2).strip().strip("\"'")
     _flush_file()
     return patch
+
+
+def _safe_target_path(sandbox_dir: Path, target_path: str) -> Path:
+    """防 path traversal:target_path 越出 sandbox 抛 RuntimeError。
+
+    用 Path.resolve() + relative_to() 检测(不仅字符串 startswith,避免符号链接 /
+    `..` segment / 绝对路径 等多种 traversal 路径绕过)。返回 resolve 后的
+    target 绝对路径。
+
+    apply_patch 运行时使用 → RuntimeError;parse_patch 解析时使用
+    _safe_source_path → ValueError(让 _safe_call 自然 catch)。
+    """
+    sandbox_root = sandbox_dir.resolve()
+    target_abs = (sandbox_root / target_path).resolve()
+    try:
+        target_abs.relative_to(sandbox_root)
+    except ValueError as exc:
+        raise RuntimeError(
+            f"patch target_path 越出 sandbox: {target_path}") from exc
+    return target_abs
+
+
+def _safe_source_path(experiment_dir: Path, source_rel: str) -> Path:
+    """防 path traversal:patch source 必须在 experiment root 内。
+
+    用 Path.resolve() + relative_to() 检测,覆盖 `..` 段 / 绝对路径等 traversal。
+    parse 时使用 → ValueError(让 _safe_call 自然翻成 WorkflowError)。
+    """
+    exp_root = experiment_dir.resolve()
+    source_abs = (exp_root / source_rel).resolve()
+    try:
+        source_abs.relative_to(exp_root)
+    except ValueError as exc:
+        raise ValueError(
+            f"patch source 越出 experiment: {source_rel}") from exc
+    return source_abs
+
+
+def apply_patch(patch: HarnessPatch, sandbox_dir: Path) -> list[PatchFile]:
+    """对 sandbox_dir 应用 patch.files —— 每个 PatchFile 覆盖对应 target。
+
+    target 父目录自动 mkdir。覆盖原 source dir 内的同名文件(整文件替换)。
+    target_path 越出 sandbox 抛 RuntimeError (path traversal 防御)。
+    任一 source 文件不存在 → FileNotFoundError(由 LocalPathAdapter 翻成
+    WorkflowError 显示给用户)。返回 applied 的 PatchFile 列表。
+    """
+    applied: list[PatchFile] = []
+    for pf in patch.files:
+        if not pf.source_path.exists():
+            raise FileNotFoundError(
+                f"patch source 不存在: {pf.source_path} (target: {pf.target_path})")
+        target_abs = _safe_target_path(sandbox_dir, pf.target_path)
+        target_abs.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(pf.source_path, target_abs)
+        applied.append(pf)
+    return applied
+
+
+def compute_patch_hash(patch: HarnessPatch) -> str:
+    """对 patch 算 deterministic hash —— spec §2.1 harness_patch.patch_hash。
+
+    输入: sorted [target_path + file_hash] + env JSON(sort_keys) + start_command
+    输出: sha256:<64 hex>。
+
+    reproducible:同样 patch 内容 → 同样 hash。env/start_command 任一变化都触发。
+    """
+    h = hashlib.sha256()
+    for pf in sorted(patch.files, key=lambda x: x.target_path):
+        h.update(pf.target_path.encode("utf-8") + b"\0")
+        h.update(pf.hash.encode("utf-8") + b"\0")
+    h.update(
+        json.dumps(patch.env, sort_keys=True, ensure_ascii=False).encode("utf-8") + b"\0")
+    h.update((patch.start_command or "").encode("utf-8") + b"\0")
+    return f"sha256:{h.hexdigest()}"

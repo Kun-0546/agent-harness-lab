@@ -118,6 +118,59 @@ start_command: python -m openmanus.agent
 
 ### 2.1 Materialized path(`runtime_source` 写了)
 
+**runtime_source 必填的可复现指纹**:
+- `source_dir_hash` (local_path / git_repo 共有):**apply patch 之前**对 raw
+  source 目录算的 sha256(算法见 `src/agent_harness_lab/hash_utils.py`)。
+  忽略 `.git` / `.venv` / `__pycache__` / `node_modules` / `.idea` / `.vscode` /
+  `.pytest_cache` / `*.pyc` / `*.pyo` / `.DS_Store` / `Thumbs.db`。
+- `commit_sha` (仅 git_repo,C6 实现):checkout 的 commit hash
+- `harness_patch.patch_hash`:patch files + env + start_command 的整体 hash
+
+只记 path / url 不算 reproducible —— 必须有 source_dir_hash + patch_hash 才能
+"在另一台机器上重放出等价 sandbox 状态"。
+
+#### 2.1.1 local_path (C5)
+
+```json
+{
+  "snapshot_id": "snap-<run_id>-<variant_id>",
+  "run_id": "run-20260522-103045",
+  "variant_id": "V2",
+  "experiment": "001-greedy-explorer",
+  "created_at": "2026-05-22T10:30:45Z",
+
+  "runtime_source": {
+    "type": "local_path",
+    "name": "local-aider",
+    "path": "<home>/projects/aider",
+    "source_dir_hash": "sha256:<raw source pre-patch 的 dir hash>"
+  },
+
+  "harness_patch": {
+    "applied": [
+      {"target_path": "prompts/system.md", "source_path": "patches/V2/system.md", "hash": "sha256:..."}
+    ],
+    "env": {"HARNESS_MAX_DEPTH": "5"},
+    "start_command": "python agent.py",
+    "patch_hash": "sha256:<sorted files + env + start_command 的 hash>"
+  },
+
+  "sandbox": {
+    "type": "copy_dir",
+    "path": "sandbox/run-20260522-103045/V2",
+    "start_command": "python agent.py"
+  },
+
+  "environment": {
+    "python_version": "3.14.0",
+    "os": "Windows-10.0.26200",
+    "captured_at": "2026-05-22T10:30:45Z"
+  }
+}
+```
+
+#### 2.1.2 git_repo (C6 留)
+
 ```json
 {
   "snapshot_id": "snap-<run_id>-<variant_id>",
@@ -131,7 +184,8 @@ start_command: python -m openmanus.agent
     "name": "openmanus-main",
     "url": "https://github.com/.../openmanus.git",
     "ref": "main",
-    "commit_sha": "abc123def456..."
+    "commit_sha": "abc123def456...",
+    "source_dir_hash": "sha256:<checkout 后 pre-patch dir hash>"
   },
 
   "harness_patch": {

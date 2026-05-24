@@ -1,14 +1,16 @@
 """RuntimeSnapshot —— 一次 (variant) 跑的可复现指纹(spec §1.7 / §2 / §5)。
 
-C4 范围:
+范围:
 - RuntimeSnapshot dataclass + JSON I/O
-- build_snapshot:legacy 路径不依赖 sandbox(snapshot 写在跑之前;materialize
-  失败时也能写)。materialized 路径(C5+)再扩展。
+- build_snapshot:legacy 路径不依赖 sandbox(connect_md_hash 跟 materialize
+  是否成功无关);materialized 路径需 sandbox(已 materialize)才能填 harness_patch
+  / sandbox 字段。
 - write_snapshot:落盘到 results/snapshots/<run_id>/<variant_id>.json
 - build_environment:采 python_version / os / captured_at(UTC ISO)
 
-Legacy snapshot_id 固定 "legacy"(spec §3 固定 contract);C5+ materialized
-snapshot_id 是 "snap-<run_id>-<variant_id>"。
+snapshot_id (spec §3 固定 contract):
+- legacy → "legacy"
+- materialized → "snap-<run_id>-<variant_id>"
 """
 from __future__ import annotations
 
@@ -73,11 +75,38 @@ def build_snapshot(
 ) -> RuntimeSnapshot:
     """构造 RuntimeSnapshot。adapter.snapshot_fields 提供 runtime_source dict。
 
-    Legacy 路径:sandbox 可为 None(snapshot 在 run 之前就能 build,不依赖
-    materialize 成功)。Materialized 路径(C5+):sandbox 必填,且 harness_patch /
-    sandbox 字段填实际值(C5+ 实现)。
+    Legacy 路径(version.runtime_source=None):harness_patch / sandbox 永远 None;
+    sandbox 参数可为 None(snapshot 不依赖 materialize 成功)。
+
+    Materialized 路径(runtime_source 写了 + sandbox 已 materialize + patch 有值):
+    harness_patch 填 spec §2.1 schema (applied + env + start_command + patch_hash),
+    sandbox 填 (type + path + start_command)。
     """
     env = build_environment()
+    is_materialized = version.runtime_source is not None
+
+    if is_materialized and sandbox is not None and version.patch is not None:
+        from agent_harness_lab.patch import compute_patch_hash
+        harness_patch_dict: dict | None = {
+            "applied": [
+                {"target_path": pf.target_path,
+                 "source_path": str(pf.source_path),
+                 "hash": pf.hash}
+                for pf in version.patch.files
+            ],
+            "env": dict(version.patch.env),
+            "start_command": version.patch.start_command,
+            "patch_hash": compute_patch_hash(version.patch),
+        }
+        sandbox_dict: dict | None = {
+            "type": sandbox.type,
+            "path": str(sandbox.path) if sandbox.path else None,
+            "start_command": sandbox.start_command,
+        }
+    else:
+        harness_patch_dict = None
+        sandbox_dict = None
+
     return RuntimeSnapshot(
         snapshot_id=compute_snapshot_id(version, ctx.run_id),
         run_id=ctx.run_id,
@@ -85,8 +114,8 @@ def build_snapshot(
         experiment=ctx.experiment_dir.name,
         created_at=env["captured_at"],
         runtime_source=adapter.snapshot_fields(version, ctx, sandbox),
-        harness_patch=None,             # C5+ 填(legacy 永远 None)
-        sandbox=None,                   # C5+ 填(legacy 永远 None)
+        harness_patch=harness_patch_dict,
+        sandbox=sandbox_dict,
         environment=env,
     )
 

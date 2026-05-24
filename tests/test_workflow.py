@@ -450,8 +450,150 @@ class TestRuntimeSourcePreflight(unittest.TestCase):
         self.assertIn("not implemented yet", msg)
         self.assertIn("V1", msg)
         self.assertIn("openmanus-main", msg)
-        self.assertIn("local_path 留 C5", msg)
+        self.assertIn("type=git_repo", msg)
         self.assertIn("git_repo 留 C6", msg)
+
+
+# ---- Runtime Materialization local_path (C5) ----
+
+
+class TestRuntimeSourceLocalPathPreflight(unittest.TestCase):
+    """C5: local_path runtime_source 通过 preflight + 走 materialize 跑通。
+
+    新加的 patch 段 validate 在 preflight 阶段抓 (patch=None / 缺 start_command /
+    patch source 文件不存在)。
+    """
+
+    def setUp(self) -> None:
+        import sys
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name)
+        self.exp = self.root / "experiments" / "001-lp"
+        self.exp.mkdir(parents=True)
+        (self.exp / "program.md").write_text(
+            "# program\n\n## 假设\nlocal_path。\n\n## 声明\n"
+            "- 环境:无\n- 对话模式:模拟\n- 状态:重置\n"
+            "- 评分:本地桩\n- 运行模式:人评\n- 对比方式:对基线\n\n"
+            "## 留/丢规则\n人评。\n\n## 喊人规则\n人评。\n",
+            encoding="utf-8")
+        (self.exp / "rubric.md").write_text(
+            "## 准确\n权重: 1.0\n判甲。\n", encoding="utf-8")
+        (self.exp / "harnesses").mkdir()
+        (self.exp / "cases").mkdir()
+        (self.exp / "cases" / "D-01.md").write_text(
+            "---\nid: D-01\n---\n## 起始输入\nhi\n", encoding="utf-8")
+
+        # 真 source dir 含 echo agent (workflow.run 会跑它)
+        self.source = self.root / "local-src"
+        self.source.mkdir()
+        echo_script = """import json, sys
+for line in sys.stdin:
+    data = json.loads(line)
+    sys.stdout.write(json.dumps({"response": "echo:" + data["input"]}) + "\\n")
+    sys.stdout.flush()
+"""
+        (self.source / "agent.py").write_text(echo_script, encoding="utf-8")
+
+        # runtime-sources.md 声明 local_path source
+        (self.root / "runtime-sources.md").write_text(
+            f"## local-src\n"
+            f"type: local_path\n"
+            f"path: {self.source}\n",
+            encoding="utf-8")
+
+        # patches/V1/ 文件 (变更 agent.py)
+        patches = self.exp / "patches" / "V1"
+        patches.mkdir(parents=True)
+        patched_script = """import json, sys
+for line in sys.stdin:
+    data = json.loads(line)
+    sys.stdout.write(json.dumps({"response": "patched:" + data["input"]}) + "\\n")
+    sys.stdout.flush()
+"""
+        (patches / "agent.py").write_text(patched_script, encoding="utf-8")
+
+        self.python = sys.executable
+
+    def _write_v1(self, *, patch_section: str):
+        (self.exp / "harnesses" / "V1.md").write_text(
+            "---\n"
+            "id: V1\n"
+            "基线: 是\n"
+            "runtime_source: local-src\n"
+            "---\n"
+            "## 这是什么\n极简模式。\n\n"
+            f"{patch_section}",
+            encoding="utf-8")
+
+    def test_run_passes_preflight_and_writes_materialized_snapshot(self):
+        """完整 local_path 跑通:preflight pass + materialize + snapshot.json 含
+        materialized 字段(source_dir_hash / harness_patch / sandbox)。
+        """
+        self._write_v1(patch_section=(
+            "## Patch\n\n"
+            "files:\n"
+            "  - target: agent.py\n"
+            "    source: patches/V1/agent.py\n\n"
+            f'start_command: "{self.python}" agent.py\n'))
+
+        # 跑 run (echo agent 实际会跑;stub_simulator 决定多少轮)
+        # capture stdout 防止 pytest 输出嘈杂
+        import contextlib
+        import io as _io
+        buf = _io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            result = run(self.exp, use_llm=False)
+
+        # run 应成功(至少 1 case OK)
+        self.assertGreater(result.ok, 0,
+                           f"run failed: {result.errors};stdout: {buf.getvalue()}")
+
+        # snapshot.json 应落盘到 results/snapshots/<run_id>/V1.json
+        snapshots_dir = self.exp / "results" / "snapshots"
+        run_dirs = list(snapshots_dir.iterdir())
+        self.assertEqual(len(run_dirs), 1, "应该只有一个 run_id 目录")
+        v1_snap = run_dirs[0] / "V1.json"
+        self.assertTrue(v1_snap.exists())
+
+        # snapshot 内容 materialized 字段全部 present
+        data = json.loads(v1_snap.read_text(encoding="utf-8"))
+        self.assertTrue(data["snapshot_id"].startswith("snap-"))
+        self.assertEqual(data["runtime_source"]["type"], "local_path")
+        self.assertEqual(data["runtime_source"]["name"], "local-src")
+        self.assertTrue(
+            data["runtime_source"]["source_dir_hash"].startswith("sha256:"))
+        self.assertIsNotNone(data["harness_patch"])
+        self.assertTrue(
+            data["harness_patch"]["patch_hash"].startswith("sha256:"))
+        self.assertEqual(len(data["harness_patch"]["applied"]), 1)
+        self.assertIsNotNone(data["sandbox"])
+        self.assertEqual(data["sandbox"]["type"], "copy_dir")
+
+    def test_preflight_rejects_missing_start_command(self):
+        """patch.start_command 缺 → preflight 拒 (M1 不假设默认命令)。"""
+        self._write_v1(patch_section=(
+            "## Patch\n\n"
+            "files:\n"
+            "  - target: agent.py\n"
+            "    source: patches/V1/agent.py\n"))   # 没 start_command
+        with self.assertRaises(WorkflowError) as ctx:
+            run(self.exp, use_llm=False)
+        msg = str(ctx.exception)
+        self.assertIn("start_command", msg)
+
+    def test_preflight_rejects_missing_patch_source_file(self):
+        """patch.files[i].source 文件不存在 → preflight 拒。"""
+        self._write_v1(patch_section=(
+            "## Patch\n\n"
+            "files:\n"
+            "  - target: agent.py\n"
+            "    source: patches/V1/nonexistent.py\n\n"
+            f'start_command: "{self.python}" agent.py\n'))
+        with self.assertRaises(WorkflowError) as ctx:
+            run(self.exp, use_llm=False)
+        msg = str(ctx.exception)
+        self.assertIn("source 文件不存在", msg)
 
 
 if __name__ == "__main__":

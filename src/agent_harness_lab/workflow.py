@@ -195,16 +195,28 @@ def run(exp_dir: Path, use_llm: bool) -> RunResult:
         raise WorkflowError(
             "runtime_source 引用有问题:\n  - " + "\n  - ".join(ref_problems))
 
-    # 当前只支持 legacy(无 runtime_source);写了的 → hard fail
-    unsupported = [
-        f"版本 {v.version_id}:写了 runtime_source={v.runtime_source!r},"
-        f"但 materialize adapter 还没实现 (当前只支持 legacy;local_path 留 C5, git_repo 留 C6)"
-        for v in versions if v.runtime_source is not None
-    ]
+    # 当前支持 legacy + local_path;其他 type (git_repo 等) 还没 adapter → hard fail
+    # source 名错(ref_problems)已上面 catch;这里只针对 type 不支持
+    sources_by_name = {s.name: s for s in runtime_sources}
+    unsupported = []
+    for v in versions:
+        if v.runtime_source is None:
+            continue
+        src = sources_by_name.get(v.runtime_source)
+        if src is None:
+            continue  # 已被 ref_problems catch
+        if src.type == "local_path":
+            continue  # C5 supported
+        unsupported.append(
+            f"版本 {v.version_id}:runtime_source={v.runtime_source!r} "
+            f"(type={src.type}) 还没 adapter "
+            f"(当前支持 legacy + local_path;git_repo 留 C6)")
     if unsupported:
         raise WorkflowError(
             "runtime_source path not implemented yet:\n  - "
             + "\n  - ".join(unsupported))
+    # patch validate (start_command 必填 / source 文件存在等) 由 run_preflight
+    # 的 v.validate() → patch.validate() 链路统一抓,不再 workflow 内重复
 
     # Legacy connect fallback 校验:无 runtime_source + 无 variant.connect → 要全局 connect.md
     needs_global = [v.version_id for v in versions
@@ -243,7 +255,7 @@ def run(exp_dir: Path, use_llm: bool) -> RunResult:
     print(f"实验:{exp_dir.name}  {len(versions)} 版本 × {len(cases)} case,"
           f"多轮跑({sim_name})")
 
-    # 构造 ctx 传给 runner;adapter dispatch 在 runner 里。
+    # 构造 ctx + per variant 走 lifecycle:adapter dispatch → materialize → snapshot
     run_id = f"run-{time.strftime('%Y%m%d-%H%M%S')}"
     ctx = MaterializeContext(
         run_id=run_id,
@@ -252,22 +264,47 @@ def run(exp_dir: Path, use_llm: bool) -> RunResult:
         runtime_sources=runtime_sources,
     )
 
-    # per variant 在跑之前 build_snapshot + write_snapshot 落盘。
-    # legacy snapshot 不依赖 sandbox(connect_md_hash 跟 materialize 是否成功无关),
-    # 所以即使 variant 后续 materialize 失败,snapshot.json 仍写得上,
-    # snapshots_map 也保证每个 variant 都有 snapshot_id ("legacy" 固定)。
-    # snapshot 是关键证据;写失败 hard fail 整个 run。
+    # per variant lifecycle:adapter → materialize → snapshot → ...
+    # - materialize 失败 hard fail (spec §B.5 Q6):materialized adapter 不假装能跑
+    # - legacy materialize 是 no-op,sandbox.path=None,不会失败
+    # - snapshot 是关键证据(spec §3 字面契约 + materialized 路径必填 hash):
+    #   写失败 hard fail 整个 run
+    # - sandbox 是 per variant (不 per case),跨 case 复用;teardown 在 run 全
+    #   跑完 finally 块 per variant (M1 默认 no-op = keep,C7 加 flag 后才删)
+    from agent_harness_lab.materialize import RuntimeAdapter, Sandbox
+    adapters_map: dict[str, RuntimeAdapter] = {}
+    sandboxes_map: dict[str, Sandbox] = {}
     snapshots_map: dict[str, str] = {}
     for v in versions:
+        adapter = adapter_for(v, ctx)
+        adapters_map[v.version_id] = adapter
         try:
-            snap = build_snapshot(v, ctx, adapter_for(v))
+            sandbox = adapter.materialize(v, ctx)
+        except Exception as e:  # noqa: BLE001
+            raise WorkflowError(
+                f"materialize 失败 (variant {v.version_id}):{e}") from e
+        sandboxes_map[v.version_id] = sandbox
+        try:
+            snap = build_snapshot(v, ctx, adapter, sandbox)
             write_snapshot(snap, exp_dir)
         except OSError as e:
             raise WorkflowError(
                 f"snapshot 写失败 (variant {v.version_id}):{e}") from e
         snapshots_map[v.version_id] = snap.snapshot_id
 
-    runs = run_experiment(versions, cases, simulator, ctx, snapshots_map)
+    try:
+        runs = run_experiment(versions, cases, simulator,
+                              adapters_map, sandboxes_map, snapshots_map)
+    finally:
+        # per variant teardown (M1 LocalPathAdapter / LegacyAdapter 都 no-op;
+        # C7 加 --cleanup-sandboxes flag 后 LocalPathAdapter 会 shutil.rmtree)
+        for v in versions:
+            sb = sandboxes_map.get(v.version_id)
+            if sb is not None:
+                try:
+                    adapters_map[v.version_id].teardown(sb)
+                except Exception:  # noqa: BLE001
+                    pass  # teardown 失败不该 fail run
 
     results_dir = exp_dir / "results"
     results_dir.mkdir(exist_ok=True)

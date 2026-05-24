@@ -169,5 +169,95 @@ class TestWriteSnapshot(unittest.TestCase):
         self.assertEqual(files, ["V1.json", "V2.json", "V3.json"])
 
 
+class TestBuildSnapshotMaterialized(unittest.TestCase):
+    """C5: materialized 路径下 build_snapshot 填 harness_patch + sandbox 字段。"""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name)
+        self.source = self.root / "src"
+        self.source.mkdir()
+        (self.source / "agent.py").write_text("agent", encoding="utf-8")
+        self.exp = self.root / "exp"
+        self.exp.mkdir()
+
+    def _ctx(self):
+        from agent_harness_lab.runtime_source import RuntimeSource
+        return MaterializeContext(
+            run_id="run-X",
+            experiment_dir=self.exp,
+            fallback_connect=None,
+            runtime_sources=[RuntimeSource(
+                name="src", type="local_path",
+                config={"path": str(self.source)})],
+        )
+
+    def _v(self):
+        from agent_harness_lab.patch import HarnessPatch
+        return Version(
+            path=Path("fake.md"), version_id="V1", is_baseline=True,
+            what="test", connect=None, runtime_source="src",
+            patch=HarnessPatch(files=[], env={"X": "1"},
+                                start_command="python agent.py"),
+        )
+
+    def test_materialized_snapshot_id_format(self):
+        """materialized snapshot_id = 'snap-<run_id>-<variant_id>'。"""
+        from agent_harness_lab.materialize.local_path import LocalPathAdapter
+        adapter = LocalPathAdapter()
+        sandbox = adapter.materialize(self._v(), self._ctx())
+        snap = build_snapshot(self._v(), self._ctx(), adapter, sandbox)
+        self.assertEqual(snap.snapshot_id, "snap-run-X-V1")
+
+    def test_materialized_harness_patch_filled(self):
+        """harness_patch 字段含 applied / env / start_command / patch_hash。"""
+        from agent_harness_lab.materialize.local_path import LocalPathAdapter
+        adapter = LocalPathAdapter()
+        sandbox = adapter.materialize(self._v(), self._ctx())
+        snap = build_snapshot(self._v(), self._ctx(), adapter, sandbox)
+        self.assertIsNotNone(snap.harness_patch)
+        self.assertIn("applied", snap.harness_patch)
+        self.assertEqual(snap.harness_patch["env"], {"X": "1"})
+        self.assertEqual(snap.harness_patch["start_command"], "python agent.py")
+        self.assertTrue(snap.harness_patch["patch_hash"].startswith("sha256:"))
+
+    def test_materialized_sandbox_filled(self):
+        """sandbox 字段含 type / path / start_command。"""
+        from agent_harness_lab.materialize.local_path import LocalPathAdapter
+        adapter = LocalPathAdapter()
+        sandbox = adapter.materialize(self._v(), self._ctx())
+        snap = build_snapshot(self._v(), self._ctx(), adapter, sandbox)
+        self.assertIsNotNone(snap.sandbox)
+        self.assertEqual(snap.sandbox["type"], "copy_dir")
+        self.assertIn("path", snap.sandbox)
+        self.assertEqual(snap.sandbox["start_command"], "python agent.py")
+
+    def test_materialized_runtime_source_has_source_dir_hash(self):
+        """runtime_source 含 source_dir_hash (spec §2.1 schema extension)。"""
+        from agent_harness_lab.materialize.local_path import LocalPathAdapter
+        adapter = LocalPathAdapter()
+        sandbox = adapter.materialize(self._v(), self._ctx())
+        snap = build_snapshot(self._v(), self._ctx(), adapter, sandbox)
+        self.assertEqual(snap.runtime_source["type"], "local_path")
+        self.assertIn("source_dir_hash", snap.runtime_source)
+        self.assertTrue(
+            snap.runtime_source["source_dir_hash"].startswith("sha256:"))
+
+    def test_materialized_write_roundtrip(self):
+        """write_snapshot + 读回 JSON,materialized 字段完整。"""
+        from agent_harness_lab.materialize.local_path import LocalPathAdapter
+        adapter = LocalPathAdapter()
+        sandbox = adapter.materialize(self._v(), self._ctx())
+        snap = build_snapshot(self._v(), self._ctx(), adapter, sandbox)
+        path = write_snapshot(snap, self.exp)
+        data = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(data["snapshot_id"], "snap-run-X-V1")
+        self.assertIsNotNone(data["harness_patch"])
+        self.assertIsNotNone(data["sandbox"])
+        self.assertEqual(data["runtime_source"]["type"], "local_path")
+        self.assertIn("source_dir_hash", data["runtime_source"])
+
+
 if __name__ == "__main__":
     unittest.main()

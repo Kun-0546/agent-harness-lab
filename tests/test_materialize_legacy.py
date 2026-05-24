@@ -13,6 +13,8 @@ from unittest.mock import patch
 from agent_harness_lab.connect import Connect
 from agent_harness_lab.materialize import MaterializeContext, adapter_for
 from agent_harness_lab.materialize.legacy import LegacyAdapter
+from agent_harness_lab.materialize.local_path import LocalPathAdapter
+from agent_harness_lab.runtime_source import RuntimeSource
 from agent_harness_lab.version import Version
 
 
@@ -156,28 +158,57 @@ class TestLegacyAdapterLifecycle(unittest.TestCase):
 
 
 class TestAdapterDispatcher(unittest.TestCase):
-    """adapter_for(version) 路由。"""
+    """adapter_for(version, ctx) 路由。"""
 
     def test_no_runtime_source_yields_legacy(self):
         """version.runtime_source=None → LegacyAdapter。"""
         v = _make_version(runtime_source=None)
-        adapter = adapter_for(v)
+        adapter = adapter_for(v, _make_ctx())
         self.assertIsInstance(adapter, LegacyAdapter)
 
-    def test_runtime_source_written_raises_not_implemented(self):
-        """version.runtime_source 写了 → NotImplementedError(当前只支持 legacy)。
+    def test_local_path_source_yields_local_path_adapter(self):
+        """runtime_source 写了,source.type=local_path → LocalPathAdapter (C5)。"""
+        v = _make_version(runtime_source="local-aider")
+        ctx = MaterializeContext(
+            run_id="run-test", experiment_dir=Path("/tmp/exp"),
+            fallback_connect=None,
+            runtime_sources=[
+                RuntimeSource(name="local-aider", type="local_path",
+                              config={"path": "/some/path"})],
+        )
+        adapter = adapter_for(v, ctx)
+        self.assertIsInstance(adapter, LocalPathAdapter)
 
-        正常路径在 workflow.preflight 已 hard fail;本测试是 defensive,
-        防 preflight bypass 的代码路径无声跑到 dispatcher。
-        """
+    def test_git_repo_source_raises_not_implemented(self):
+        """runtime_source 写了,source.type=git_repo → NotImplementedError(C6 留)。"""
         v = _make_version(runtime_source="openmanus-main")
-        with self.assertRaises(NotImplementedError) as ctx:
-            adapter_for(v)
-        msg = str(ctx.exception)
+        ctx = MaterializeContext(
+            run_id="run-test", experiment_dir=Path("/tmp/exp"),
+            fallback_connect=None,
+            runtime_sources=[
+                RuntimeSource(name="openmanus-main", type="git_repo",
+                              config={"url": "https://example.com/foo.git",
+                                      "ref": "main"})],
+        )
+        with self.assertRaises(NotImplementedError) as ctx_exc:
+            adapter_for(v, ctx)
+        msg = str(ctx_exc.exception)
         self.assertIn("V1", msg)
         self.assertIn("openmanus-main", msg)
-        self.assertIn("local_path 留 C5", msg)
+        self.assertIn("type=git_repo", msg)
         self.assertIn("git_repo 留 C6", msg)
+
+    def test_runtime_source_not_in_ctx_raises_not_implemented(self):
+        """runtime_source 写了但不在 ctx.runtime_sources → NotImplementedError
+        (preflight 应已 hard fail,本 raise 是 defensive)。
+        """
+        v = _make_version(runtime_source="ghost-source")
+        with self.assertRaises(NotImplementedError) as ctx_exc:
+            adapter_for(v, _make_ctx())  # 空 runtime_sources
+        msg = str(ctx_exc.exception)
+        self.assertIn("V1", msg)
+        self.assertIn("ghost-source", msg)
+        self.assertIn("不在 runtime-sources.md", msg)
 
 
 if __name__ == "__main__":

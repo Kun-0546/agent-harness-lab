@@ -13,10 +13,13 @@ import importlib
 import json
 import os
 import queue
+import shlex
 import subprocess
 import threading
 import urllib.error
 import urllib.request
+from pathlib import Path
+from typing import Mapping
 
 from agent_harness_lab.connect import Connect
 
@@ -139,6 +142,87 @@ class _CliSession(AgentSession):
             self.proc.wait(timeout=30)
         except Exception:  # noqa: BLE001
             self.proc.kill()
+
+
+class _SandboxCliSession(AgentSession):
+    """Sandbox 子进程模式(C5 LocalPathAdapter 用)—— shell=False + 显式 cwd/env override。
+
+    跟 _CliSession 区别:
+    - shell=False:command 走 shlex.split,不走 shell expansion(避免 metachar 注入)
+    - cwd 必填:子进程工作目录定为 sandbox path
+    - env override:default _child_env merge override (override 值覆盖 default)
+    - close():显式关 stdout/stderr pipes 避免 ResourceWarning(legacy _CliSession
+      不动,本类 only)
+
+    IPC 协议跟 _CliSession 等价:stdout 一行一个 JSON 回答,stderr drain。
+    """
+
+    def __init__(self, command: str, cwd: Path,
+                 env_override: Mapping[str, str] | None = None,
+                 timeout: float = _TURN_TIMEOUT):
+        self.timeout = timeout
+        args = shlex.split(command)
+        if not args:
+            raise RuntimeError(f"start_command 是空的:{command!r}")
+        env = _child_env()
+        if env_override:
+            for k, v in env_override.items():
+                env[k] = str(v)
+        self.proc = subprocess.Popen(
+            args, shell=False, cwd=str(cwd),
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, encoding="utf-8", env=env,
+        )
+        self._lines: queue.Queue = queue.Queue()
+        self._stderr_tail: collections.deque = collections.deque(maxlen=20)
+        threading.Thread(target=self._read_stdout, daemon=True).start()
+        threading.Thread(target=self._drain_stderr, daemon=True).start()
+
+    def _read_stdout(self) -> None:
+        assert self.proc.stdout
+        for line in self.proc.stdout:
+            self._lines.put(line)
+        self._lines.put(None)
+
+    def _drain_stderr(self) -> None:
+        if self.proc.stderr is None:
+            return
+        for line in self.proc.stderr:
+            self._stderr_tail.append(line)
+
+    def send(self, user_text: str) -> str:
+        assert self.proc.stdin
+        self.proc.stdin.write(
+            json.dumps({"input": user_text}, ensure_ascii=False) + "\n")
+        self.proc.stdin.flush()
+        try:
+            line = self._lines.get(timeout=self.timeout)
+        except queue.Empty:
+            self.proc.kill()
+            raise RuntimeError(
+                f"agent 这一轮超过 {self.timeout:g} 秒没回话,判定卡死") from None
+        if line is None:
+            err = "".join(self._stderr_tail).strip()[:200]
+            raise RuntimeError(f"agent 没回话(进程已退出):{err}")
+        return str(json.loads(line).get("response", ""))
+
+    def close(self) -> None:
+        try:
+            if self.proc.stdin:
+                self.proc.stdin.close()
+            self.proc.wait(timeout=30)
+        except Exception:  # noqa: BLE001
+            self.proc.kill()
+        finally:
+            # 显式关 stdout/stderr pipes —— 避免 ResourceWarning。
+            # proc 退出后 stdout/stderr 自然 EOF,reader thread 也已 exit,
+            # close 是 safe 的。defensive try/except 防止 race。
+            for stream in (self.proc.stdout, self.proc.stderr):
+                if stream is not None:
+                    try:
+                        stream.close()
+                    except Exception:  # noqa: BLE001
+                        pass
 
 
 class _LibrarySession(AgentSession):

@@ -1,8 +1,7 @@
 """Runtime Materialization 调度层 —— Adapter Protocol + Sandbox + dispatch。
 
-当前范围:只有 LegacyAdapter(wrap agentconn.open_session,保 v0.2.0 行为等价)。
-LocalPathAdapter 留 C5, GitRepoAdapter 留 C6;runtime_source 写了但 adapter
-不存在的 variant,workflow.preflight 阶段 hard fail (不到 dispatch)。
+当前范围:LegacyAdapter (v0.2.0 兼容) + LocalPathAdapter (C5)。GitRepoAdapter
+留 C6;其他 type 的 variant,workflow.preflight 阶段 hard fail (不到 dispatch)。
 
 Protocol 签名采用 ctx 模式(spec §7 原 source/patch/run_id/variant_id 4-args
 偏离),让所有 adapter 共用 same signature:Legacy 不需要 source/patch,
@@ -66,19 +65,33 @@ class RuntimeAdapter(Protocol):
                         sandbox: Sandbox) -> dict: ...
 
 
-def adapter_for(version: Version) -> RuntimeAdapter:
-    """按 version.runtime_source 决定用哪个 adapter。
+def adapter_for(version: Version, ctx: MaterializeContext) -> RuntimeAdapter:
+    """按 version.runtime_source + ctx.runtime_sources 决定用哪个 adapter。
 
-    当前只支持 runtime_source=None (legacy)。runtime_source 写了 → 抛
-    NotImplementedError。但工作流的正常路径应该在 workflow.run_preflight
-    阶段就 hard fail (见 workflow.preflight_runtime_path),不会真走到这里;
-    本 raise 是 defensive,防 preflight bypass 的测试或未来代码路径。
+    - runtime_source=None → LegacyAdapter (v0.2.0 兼容路径)
+    - runtime_source 写了,对应 source.type=local_path → LocalPathAdapter
+    - runtime_source 写了,对应 source.type=git_repo → NotImplementedError (留 C6)
+    - runtime_source 名不在 ctx.runtime_sources → NotImplementedError
+      (preflight 应已 hard fail,本 raise 是 defensive)
     """
     from agent_harness_lab.materialize.legacy import LegacyAdapter
+    from agent_harness_lab.materialize.local_path import LocalPathAdapter
 
     if version.runtime_source is None:
         return LegacyAdapter()
+
+    source = next(
+        (s for s in ctx.runtime_sources if s.name == version.runtime_source),
+        None)
+    if source is None:
+        raise NotImplementedError(
+            f"版本 {version.version_id}:runtime_source={version.runtime_source!r} "
+            f"不在 runtime-sources.md (preflight 应已 hard fail)"
+        )
+    if source.type == "local_path":
+        return LocalPathAdapter()
     raise NotImplementedError(
         f"版本 {version.version_id}:runtime_source={version.runtime_source!r} "
-        f"adapter 还没实现 (当前只支持 legacy;local_path 留 C5, git_repo 留 C6)"
+        f"type={source.type} adapter 还没实现 "
+        f"(当前支持 legacy + local_path;git_repo 留 C6)"
     )
