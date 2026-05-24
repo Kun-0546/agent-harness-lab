@@ -505,6 +505,62 @@ for line in sys.stdin:
         self.assertIsNotNone(data["sandbox"])
         self.assertEqual(data["sandbox"]["type"], "copy_dir")
 
+    def test_run_with_cleanup_sandboxes_removes_sandbox_dir(self):
+        """C7: cleanup_sandboxes=True → 跑完 sandbox dir 不存在;snapshot.json 保留。"""
+        self._write_v1(patch_section=(
+            "## Patch\n\n"
+            "files:\n"
+            "  - target: agent.py\n"
+            "    source: patches/V1/agent.py\n\n"
+            f'start_command: "{self.python}" agent.py\n'))
+
+        import contextlib
+        import io as _io
+        buf = _io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            result = run(self.exp, use_llm=False, cleanup_sandboxes=True)
+
+        self.assertGreater(result.ok, 0,
+                           f"run failed: {result.errors};stdout: {buf.getvalue()}")
+
+        # sandbox dir 应被 shutil.rmtree
+        sandbox_root = self.exp / "sandbox"
+        if sandbox_root.exists():
+            # sandbox/<run_id>/<vid>/ 子目录应不存在 (V1 被 rmtree)
+            run_dirs = list(sandbox_root.iterdir())
+            for run_dir in run_dirs:
+                variant_dirs = list(run_dir.iterdir())
+                self.assertEqual(variant_dirs, [],
+                                 f"sandbox 应被清空,实际有: {variant_dirs}")
+        # snapshot.json 仍保留 (snapshot 不被 cleanup 影响)
+        snapshots_dir = self.exp / "results" / "snapshots"
+        self.assertTrue(snapshots_dir.exists())
+        run_dirs = list(snapshots_dir.iterdir())
+        self.assertEqual(len(run_dirs), 1)
+        self.assertTrue((run_dirs[0] / "V1.json").exists())
+
+    def test_run_default_keeps_sandbox_dir(self):
+        """C7: 不传 cleanup_sandboxes (默认 False) → sandbox dir 仍保留。"""
+        self._write_v1(patch_section=(
+            "## Patch\n\n"
+            "files:\n"
+            "  - target: agent.py\n"
+            "    source: patches/V1/agent.py\n\n"
+            f'start_command: "{self.python}" agent.py\n'))
+
+        import contextlib
+        import io as _io
+        with contextlib.redirect_stdout(_io.StringIO()):
+            run(self.exp, use_llm=False)  # 默认 cleanup_sandboxes=False
+
+        sandbox_root = self.exp / "sandbox"
+        self.assertTrue(sandbox_root.exists())
+        run_dirs = list(sandbox_root.iterdir())
+        self.assertEqual(len(run_dirs), 1)
+        variant_dirs = list(run_dirs[0].iterdir())
+        self.assertEqual(len(variant_dirs), 1)   # V1 sandbox 仍在
+        self.assertTrue((variant_dirs[0] / "agent.py").exists())
+
     def test_preflight_rejects_missing_start_command(self):
         """patch.start_command 缺 → preflight 拒 (M1 不假设默认命令)。"""
         self._write_v1(patch_section=(
@@ -652,6 +708,29 @@ for line in sys.stdin:
         self.assertEqual(len(data["harness_patch"]["applied"]), 1)
         self.assertIsNotNone(data["sandbox"])
         self.assertEqual(data["sandbox"]["type"], "git_clone")
+
+    def test_run_with_cleanup_sandboxes_removes_git_sandbox(self):
+        """C7: cleanup_sandboxes=True → git_repo sandbox (含 .git) 整个被 rmtree。"""
+        self._write_v1()
+        import contextlib
+        import io as _io
+        buf = _io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            result = run(self.exp, use_llm=False, cleanup_sandboxes=True)
+
+        self.assertGreater(result.ok, 0,
+                           f"run failed: {result.errors};stdout: {buf.getvalue()}")
+
+        # sandbox dir 应被清 (含 .git)
+        sandbox_root = self.exp / "sandbox"
+        if sandbox_root.exists():
+            run_dirs = list(sandbox_root.iterdir())
+            for run_dir in run_dirs:
+                variant_dirs = list(run_dir.iterdir())
+                self.assertEqual(variant_dirs, [])
+        # snapshot.json 仍保留
+        snapshots_dir = self.exp / "results" / "snapshots"
+        self.assertTrue(snapshots_dir.exists())
 
 
 if __name__ == "__main__":

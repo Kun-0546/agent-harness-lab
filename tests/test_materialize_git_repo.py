@@ -374,7 +374,7 @@ class TestGitRepoAdapterTeardown(unittest.TestCase):
         self.exp = self.root / "exp"
         self.exp.mkdir()
 
-    def test_teardown_keeps_sandbox(self):
+    def _setup_sandbox(self):
         v = _make_version(runtime_source="src",
                           patch=HarnessPatch(files=[], env={}, start_command="cmd"))
         ctx = MaterializeContext(
@@ -384,11 +384,30 @@ class TestGitRepoAdapterTeardown(unittest.TestCase):
                 config={"url": str(self.repo), "ref": "main"})])
         adapter = GitRepoAdapter()
         sandbox = adapter.materialize(v, ctx)
+        return adapter, sandbox
+
+    def test_teardown_keeps_sandbox(self):
+        """teardown 默认 keep:sandbox.path 仍存在,含 .git。"""
+        adapter, sandbox = self._setup_sandbox()
         self.assertTrue(sandbox.path.exists())
         self.assertTrue((sandbox.path / "agent.py").exists())
         adapter.teardown(sandbox)
         self.assertTrue(sandbox.path.exists())
         self.assertTrue((sandbox.path / "agent.py").exists())
+
+    def test_teardown_with_cleanup_removes_sandbox(self):
+        """C7: cleanup=True → shutil.rmtree(sandbox.path) (clone mode 含 .git 全删)。"""
+        adapter, sandbox = self._setup_sandbox()
+        self.assertTrue(sandbox.path.exists())
+        adapter.teardown(sandbox, cleanup=True)
+        self.assertFalse(sandbox.path.exists())
+
+    def test_teardown_with_cleanup_idempotent(self):
+        """C7 defensive: 连续两次 teardown(cleanup=True) 不应抛错 (path 不存在自动 skip)。"""
+        adapter, sandbox = self._setup_sandbox()
+        adapter.teardown(sandbox, cleanup=True)  # 第一次 cleanup OK
+        self.assertFalse(sandbox.path.exists())
+        adapter.teardown(sandbox, cleanup=True)  # 第二次 path 已不存在 → 不应抛错
 
 
 class TestGitRepoAdapterSnapshotFields(unittest.TestCase):

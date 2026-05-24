@@ -307,13 +307,28 @@ class TestLocalPathAdapterTeardown(unittest.TestCase):
         return adapter, sandbox
 
     def test_teardown_keeps_sandbox(self):
-        """teardown M1 默认 keep:sandbox.path 仍存在,内容仍在。"""
+        """teardown 默认 keep:sandbox.path 仍存在,内容仍在。"""
         adapter, sandbox = self._setup_sandbox()
         self.assertTrue(sandbox.path.exists())
         self.assertTrue((sandbox.path / "a.txt").exists())
         adapter.teardown(sandbox)
         self.assertTrue(sandbox.path.exists())
         self.assertTrue((sandbox.path / "a.txt").exists())
+
+    def test_teardown_with_cleanup_removes_sandbox(self):
+        """C7: cleanup=True → shutil.rmtree(sandbox.path)。"""
+        adapter, sandbox = self._setup_sandbox()
+        self.assertTrue(sandbox.path.exists())
+        adapter.teardown(sandbox, cleanup=True)
+        self.assertFalse(sandbox.path.exists())
+
+    def test_teardown_with_cleanup_on_missing_path_is_noop(self):
+        """C7 defensive: sandbox.path 已不存在时 cleanup=True 也不应抛错。"""
+        adapter, sandbox = self._setup_sandbox()
+        import shutil
+        shutil.rmtree(sandbox.path)  # 模拟外部已删
+        self.assertFalse(sandbox.path.exists())
+        adapter.teardown(sandbox, cleanup=True)   # 不应抛错
 
 
 class TestLocalPathAdapterSnapshotFields(unittest.TestCase):

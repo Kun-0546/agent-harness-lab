@@ -145,7 +145,8 @@ def run_preflight(program: Program, versions: list[Version],
     return problems
 
 
-def run(exp_dir: Path, use_llm: bool) -> RunResult:
+def run(exp_dir: Path, use_llm: bool,
+        cleanup_sandboxes: bool = False) -> RunResult:
     """跑实验:加载 → 校验 → 每个 harness variant 过 cases → 存对话。
 
     program / 版本 / case / 基线数量 / 接入配置 任一不过,都抛 WorkflowError。
@@ -156,6 +157,10 @@ def run(exp_dir: Path, use_llm: bool) -> RunResult:
     - 当前支持 legacy + local_path + git_repo;docker_image / remote_api /
       dev_agent 留 M2+ (parser 阶段就拒未知 type)
     - 构造 MaterializeContext 传给 runner;runner 通过 adapter dispatch
+
+    cleanup_sandboxes:默认 False (keep sandbox,sandbox 是证据链)。True 时
+    跑完 finally 块对每个 sandbox.path 做 shutil.rmtree;legacy 无 sandbox
+    path → no-op。
     """
     program_path = exp_dir / "program.md"
     if not program_path.exists():
@@ -299,15 +304,17 @@ def run(exp_dir: Path, use_llm: bool) -> RunResult:
         runs = run_experiment(versions, cases, simulator,
                               adapters_map, sandboxes_map, snapshots_map)
     finally:
-        # per variant teardown (M1 LocalPathAdapter / LegacyAdapter 都 no-op;
-        # C7 加 --cleanup-sandboxes flag 后 LocalPathAdapter 会 shutil.rmtree)
+        # per variant teardown。cleanup=True (来自 --cleanup-sandboxes flag) 时
+        # LocalPathAdapter / GitRepoAdapter 会 shutil.rmtree(sandbox.path);
+        # LegacyAdapter no-op (sandbox.path=None)。teardown 失败不该 fail run。
         for v in versions:
             sb = sandboxes_map.get(v.version_id)
             if sb is not None:
                 try:
-                    adapters_map[v.version_id].teardown(sb)
+                    adapters_map[v.version_id].teardown(
+                        sb, cleanup=cleanup_sandboxes)
                 except Exception:  # noqa: BLE001
-                    pass  # teardown 失败不该 fail run
+                    pass
 
     results_dir = exp_dir / "results"
     results_dir.mkdir(exist_ok=True)

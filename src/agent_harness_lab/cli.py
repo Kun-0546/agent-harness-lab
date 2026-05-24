@@ -291,7 +291,8 @@ def cmd_run(args: argparse.Namespace) -> int:
         print(f"找不到实验:{args.experiment}", file=sys.stderr)
         return 1
     try:
-        result = workflow.run(exp_dir, args.llm)
+        result = workflow.run(exp_dir, args.llm,
+                              cleanup_sandboxes=args.cleanup_sandboxes)
     except workflow.WorkflowError as e:
         print(str(e), file=sys.stderr)
         return 1
@@ -500,6 +501,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("experiment", help="实验编号或名字")
     p_run.add_argument("--llm", action="store_true",
                        help="用 LLM 模拟器现生追问(先设 AHL_SIM_* 环境变量);默认用本地桩")
+    p_run.add_argument("--cleanup-sandboxes", action="store_true",
+                       help="跑完删 sandbox dir (默认 keep,sandbox 是证据链);"
+                            "legacy variant 无 sandbox path,该 flag 对它们无效")
     p_run.set_defaults(func=cmd_run)
 
     p_score = sub.add_parser("score", help="给最近一次 run 的对话按 rubric 打分")

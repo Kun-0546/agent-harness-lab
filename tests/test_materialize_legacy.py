@@ -101,6 +101,15 @@ class TestLegacyAdapterLifecycle(unittest.TestCase):
         sandbox = adapter.materialize(v, _make_ctx())
         adapter.teardown(sandbox)  # 不应抛错
 
+    def test_teardown_with_cleanup_is_noop(self):
+        """C7: legacy sandbox.path=None,cleanup=True 也不应抛错 (flag 对 legacy 无效)。"""
+        conn = Connect(path=Path("c.md"), conn_type="进程内库", config="x")
+        v = _make_version(connect=conn)
+        adapter = LegacyAdapter()
+        sandbox = adapter.materialize(v, _make_ctx())
+        self.assertIsNone(sandbox.path)
+        adapter.teardown(sandbox, cleanup=True)  # 不应抛错
+
     def test_snapshot_fields_returns_legacy_with_connect_md_hash(self):
         """C4:type='legacy_connect' + connect_md_hash 是 workspace connect.md 的 sha256。"""
         with tempfile.TemporaryDirectory() as root:

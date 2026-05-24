@@ -24,7 +24,9 @@ clone mode (vs worktree mode 留 M2+ 优化):
 """
 from __future__ import annotations
 
+import os
 import shutil
+import stat
 import subprocess
 from pathlib import Path
 
@@ -74,6 +76,15 @@ def _git_run(git: str, args: list[str], cwd: Path | None = None) -> None:
         stderr = (exc.stderr or "").strip()[:300]
         raise RuntimeError(
             f"git {args[0]} 失败 (exit {exc.returncode}): {stderr}") from exc
+
+
+def _chmod_retry(func, path, exc_info):
+    """shutil.rmtree onerror:read-only 文件 chmod 后 retry (Windows git .git/objects)。"""
+    try:
+        os.chmod(path, stat.S_IWRITE)
+        func(path)
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _git_capture(git: str, args: list[str], cwd: Path | None = None) -> str:
@@ -159,9 +170,14 @@ class GitRepoAdapter:
             env_override=env or None,
         )
 
-    def teardown(self, sandbox: Sandbox) -> None:
-        # M1: 默认 keep (C7 --cleanup-sandboxes flag 才 shutil.rmtree)
-        pass
+    def teardown(self, sandbox: Sandbox, cleanup: bool = False) -> None:
+        # 默认 keep (sandbox 是证据链);cleanup=True 才 shutil.rmtree。
+        # clone mode 下 shutil.rmtree 即可清整个 sandbox (含 .git);worktree mode
+        # 留 M2+ 时再加 git worktree remove 分支。
+        # Windows: git clone 的 .git/objects 文件可能 read-only,shutil.rmtree
+        # PermissionError → onerror chmod retry。
+        if cleanup and sandbox.path is not None and sandbox.path.exists():
+            shutil.rmtree(sandbox.path, onerror=_chmod_retry)
 
     def snapshot_fields(self, version: Version, ctx: MaterializeContext,
                         sandbox: Sandbox | None) -> dict:

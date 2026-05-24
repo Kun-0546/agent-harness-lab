@@ -40,8 +40,8 @@ class LegacyAdapter:
     def start(self, sandbox: Sandbox) -> AgentSession:
         return open_session(sandbox.metadata["connect"])
 
-    def teardown(self, sandbox: Sandbox) -> None:
-        # 没有物理 sandbox 要清。
+    def teardown(self, sandbox: Sandbox, cleanup: bool = False) -> None:
+        # legacy 无物理 sandbox(sandbox.path=None),cleanup flag 对它无效 → no-op。
         pass
 
     def snapshot_fields(self, version: Version, ctx: MaterializeContext,

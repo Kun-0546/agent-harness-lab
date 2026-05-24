@@ -101,9 +101,12 @@ class LocalPathAdapter:
             env_override=env or None,
         )
 
-    def teardown(self, sandbox: Sandbox) -> None:
-        # M1: 默认 keep (C7 --cleanup-sandboxes flag 才 shutil.rmtree)
-        pass
+    def teardown(self, sandbox: Sandbox, cleanup: bool = False) -> None:
+        # 默认 keep (sandbox 是证据链);cleanup=True 才 shutil.rmtree。
+        # 失败抛 OSError —— workflow 在 finally 块吞掉(teardown 失败不该 fail run)。
+        if cleanup and sandbox.path is not None and sandbox.path.exists():
+            import shutil
+            shutil.rmtree(sandbox.path)
 
     def snapshot_fields(self, version: Version, ctx: MaterializeContext,
                         sandbox: Sandbox | None) -> dict:
