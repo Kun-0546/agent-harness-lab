@@ -153,8 +153,8 @@ def run(exp_dir: Path, use_llm: bool) -> RunResult:
     Runtime Materialization preflight:
     - parse workspace 根的 runtime-sources.md (不存在返回空 list)
     - cross-validate variant.runtime_source 引用是否都在 sources 里
-    - 当前只支持 legacy (无 runtime_source);写了 runtime_source 的 variant
-      hard fail("adapter 还没实现";local_path 留 C5, git_repo 留 C6)
+    - 当前支持 legacy + local_path + git_repo;docker_image / remote_api /
+      dev_agent 留 M2+ (parser 阶段就拒未知 type)
     - 构造 MaterializeContext 传给 runner;runner 通过 adapter dispatch
     """
     program_path = exp_dir / "program.md"
@@ -195,9 +195,12 @@ def run(exp_dir: Path, use_llm: bool) -> RunResult:
         raise WorkflowError(
             "runtime_source 引用有问题:\n  - " + "\n  - ".join(ref_problems))
 
-    # 当前支持 legacy + local_path;其他 type (git_repo 等) 还没 adapter → hard fail
-    # source 名错(ref_problems)已上面 catch;这里只针对 type 不支持
+    # 当前支持 legacy + local_path + git_repo;其他 type (docker_image / remote_api
+    # / dev_agent 留 M2+) 还没 adapter → hard fail。source 名错(ref_problems)
+    # 已上面 catch;这里只针对 type 不支持。runtime_source.py parser 当前只接受
+    # local_path / git_repo,所以本 block 实际上空 fall-through;保留作 future-proof。
     sources_by_name = {s.name: s for s in runtime_sources}
+    _SUPPORTED_TYPES = {"local_path", "git_repo"}
     unsupported = []
     for v in versions:
         if v.runtime_source is None:
@@ -205,12 +208,12 @@ def run(exp_dir: Path, use_llm: bool) -> RunResult:
         src = sources_by_name.get(v.runtime_source)
         if src is None:
             continue  # 已被 ref_problems catch
-        if src.type == "local_path":
-            continue  # C5 supported
+        if src.type in _SUPPORTED_TYPES:
+            continue
         unsupported.append(
             f"版本 {v.version_id}:runtime_source={v.runtime_source!r} "
             f"(type={src.type}) 还没 adapter "
-            f"(当前支持 legacy + local_path;git_repo 留 C6)")
+            f"(当前支持 legacy + local_path + git_repo)")
     if unsupported:
         raise WorkflowError(
             "runtime_source path not implemented yet:\n  - "

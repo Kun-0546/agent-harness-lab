@@ -169,7 +169,10 @@ start_command: python -m openmanus.agent
 }
 ```
 
-#### 2.1.2 git_repo (C6 留)
+#### 2.1.2 git_repo (C6)
+
+**实现策略:clone mode** —— 每 variant `git clone <url> <sandbox>` + `git checkout
+<ref>` (worktree mode 留 M2+ 优化,共享 bare cache)。`sandbox.type = "git_clone"`。
 
 ```json
 {
@@ -199,7 +202,7 @@ start_command: python -m openmanus.agent
   },
 
   "sandbox": {
-    "type": "git_worktree",
+    "type": "git_clone",
     "path": "sandbox/run-20260522-103045/V2",
     "start_command": "python -m openmanus.agent"
   },
@@ -359,7 +362,7 @@ with tempfile.TemporaryDirectory() as repo:
 | **C3** | `refactor: RuntimeAdapter abstraction + LegacyAdapter` | RuntimeAdapter 抽象基类 + 注册表 + LegacyAdapter wrap agentconn。改 workflow.py 用 adapter dispatch(仅 legacy 路径),改 runner.py 接受 AgentSession。**现有 57 tests 全绿**(这是 refactor,行为不变) | 关键 checkpoint:legacy 完全等价 |
 | **C4** | `feat(snapshot): RuntimeSnapshot + persistence + run-id->snapshot-id` | snapshot.py + workflow 写 snapshots/ 目录 + run-*.json 加 snapshot_id。legacy path 写 `snapshot_id: "legacy"`。tests 17/18/22 | snapshot 加字段,legacy 行为不变(仅多两个产出) |
 | **C5** | `feat(materialize): local_path adapter` | LocalPathAdapter + tests 8/9/10/20 | local_path materialize 上线 |
-| **C6** | `feat(materialize): git_repo adapter (worktree mode) + e2e` | GitRepoAdapter + tests 11/12/13/20 + e2e test 21/19 | git_repo materialize 上线 + e2e 验证 |
+| **C6** | `feat(materialize): git_repo adapter (clone mode)` ✅ | GitRepoAdapter (clone + checkout + commit_sha + source_dir_hash 跟 C5 一致) + tests 11/12/13/20 + e2e 21/19。worktree mode 留 M2+ 优化(spec 原案是 worktree,实际选 clone 是因为 simpler + sandbox 隔离 strong) | git_repo materialize 上线 + e2e 验证 |
 | **C7** | `feat(cli): --cleanup-sandboxes flag + docs` | cli.py 加 flag, docs/file-formats.md + runtime-materialization.md 标 M1 实现, product-definition.md 更新 | docs 收尾 + flag |
 
 **M1 release 时**:merge `runtime-materialization-mvp` → `main`,打 `v0.3.0` annotated tag,

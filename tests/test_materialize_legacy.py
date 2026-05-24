@@ -179,8 +179,9 @@ class TestAdapterDispatcher(unittest.TestCase):
         adapter = adapter_for(v, ctx)
         self.assertIsInstance(adapter, LocalPathAdapter)
 
-    def test_git_repo_source_raises_not_implemented(self):
-        """runtime_source 写了,source.type=git_repo → NotImplementedError(C6 留)。"""
+    def test_git_repo_source_yields_git_repo_adapter(self):
+        """runtime_source 写了,source.type=git_repo → GitRepoAdapter (C6)。"""
+        from agent_harness_lab.materialize.git_repo import GitRepoAdapter
         v = _make_version(runtime_source="openmanus-main")
         ctx = MaterializeContext(
             run_id="run-test", experiment_dir=Path("/tmp/exp"),
@@ -190,13 +191,8 @@ class TestAdapterDispatcher(unittest.TestCase):
                               config={"url": "https://example.com/foo.git",
                                       "ref": "main"})],
         )
-        with self.assertRaises(NotImplementedError) as ctx_exc:
-            adapter_for(v, ctx)
-        msg = str(ctx_exc.exception)
-        self.assertIn("V1", msg)
-        self.assertIn("openmanus-main", msg)
-        self.assertIn("type=git_repo", msg)
-        self.assertIn("git_repo 留 C6", msg)
+        adapter = adapter_for(v, ctx)
+        self.assertIsInstance(adapter, GitRepoAdapter)
 
     def test_runtime_source_not_in_ctx_raises_not_implemented(self):
         """runtime_source 写了但不在 ctx.runtime_sources → NotImplementedError

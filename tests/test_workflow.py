@@ -389,71 +389,6 @@ class TestLegacyDetection(unittest.TestCase):
             os.chdir(original)
 
 
-# ---- Runtime Materialization preflight ----
-
-
-class TestRuntimeSourcePreflight(unittest.TestCase):
-    """写了 runtime_source 但 materialize adapter 还没实现 → hard fail。
-
-    workflow.run 在 preflight 阶段早 catch,不到 runner;不假装能跑(spec §B.5 Q6)。
-    LocalPathAdapter 留 C5, GitRepoAdapter 留 C6。
-    """
-
-    def setUp(self) -> None:
-        self._tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(self._tmp.cleanup)
-        self.root = Path(self._tmp.name)
-        self.exp = self.root / "experiments" / "001-rs"
-        self.exp.mkdir(parents=True)
-        (self.exp / "program.md").write_text(
-            "# program\n\n## 假设\nrs preflight。\n\n## 声明\n"
-            "- 环境:无\n- 对话模式:模拟\n- 状态:重置\n"
-            "- 评分:本地桩\n- 运行模式:人评\n- 对比方式:对基线\n\n"
-            "## 留/丢规则\n人评。\n\n## 喊人规则\n人评。\n",
-            encoding="utf-8")
-        (self.exp / "rubric.md").write_text(
-            "## 准确\n权重: 1.0\n判甲。\n", encoding="utf-8")
-        (self.exp / "harnesses").mkdir()
-        (self.exp / "cases").mkdir()
-        (self.exp / "cases" / "D-01.md").write_text(
-            "---\nid: D-01\n---\n## 起始输入\nhi\n", encoding="utf-8")
-        # workspace root 声明一个 runtime source(给 cross-validation 用)
-        (self.root / "runtime-sources.md").write_text(
-            "## openmanus-main\n"
-            "type: git_repo\n"
-            "url: https://example.com/openmanus.git\n"
-            "ref: main\n",
-            encoding="utf-8")
-
-    def test_run_rejects_runtime_source_until_adapter_implemented(self):
-        """variant 写了 runtime_source(source 存在) → workflow.run 抛 WorkflowError。
-
-        消息含 'not implemented yet' / 'local_path 留 C5' / 'git_repo 留 C6'
-        等指引,run 不到 runner / sandbox。
-        """
-        # variant 引用 openmanus-main(在 runtime-sources.md 里),legal cross-ref,
-        # 但当前还没 materialize adapter,workflow 应 hard fail。
-        (self.exp / "harnesses" / "V1.md").write_text(
-            "---\n"
-            "id: V1\n"
-            "基线: 是\n"
-            "runtime_source: openmanus-main\n"
-            "---\n"
-            "## 这是什么\n极简模式。\n\n"
-            "## Patch\n\n"
-            "start_command: python -m foo\n",
-            encoding="utf-8")
-
-        with self.assertRaises(WorkflowError) as ctx:
-            run(self.exp, use_llm=False)
-        msg = str(ctx.exception)
-        self.assertIn("not implemented yet", msg)
-        self.assertIn("V1", msg)
-        self.assertIn("openmanus-main", msg)
-        self.assertIn("type=git_repo", msg)
-        self.assertIn("git_repo 留 C6", msg)
-
-
 # ---- Runtime Materialization local_path (C5) ----
 
 
@@ -594,6 +529,129 @@ for line in sys.stdin:
             run(self.exp, use_llm=False)
         msg = str(ctx.exception)
         self.assertIn("source 文件不存在", msg)
+
+
+# ---- Runtime Materialization git_repo (C6) ----
+
+
+class TestRuntimeSourceGitRepoPreflight(unittest.TestCase):
+    """C6: git_repo runtime_source 通过 preflight + materialize (clone+checkout)
+    + 走完整 run/snapshot 链路。本地 git init mock repo,不联网。
+    """
+
+    def setUp(self) -> None:
+        import subprocess as sp
+        import sys
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name)
+        self.exp = self.root / "experiments" / "001-gr"
+        self.exp.mkdir(parents=True)
+        (self.exp / "program.md").write_text(
+            "# program\n\n## 假设\ngit_repo。\n\n## 声明\n"
+            "- 环境:无\n- 对话模式:模拟\n- 状态:重置\n"
+            "- 评分:本地桩\n- 运行模式:人评\n- 对比方式:对基线\n\n"
+            "## 留/丢规则\n人评。\n\n## 喊人规则\n人评。\n",
+            encoding="utf-8")
+        (self.exp / "rubric.md").write_text(
+            "## 准确\n权重: 1.0\n判甲。\n", encoding="utf-8")
+        (self.exp / "harnesses").mkdir()
+        (self.exp / "cases").mkdir()
+        (self.exp / "cases" / "D-01.md").write_text(
+            "---\nid: D-01\n---\n## 起始输入\nhi\n", encoding="utf-8")
+
+        # mock git repo 含 echo agent
+        echo_script = """import json, sys
+for line in sys.stdin:
+    data = json.loads(line)
+    sys.stdout.write(json.dumps({"response": "git-echo:" + data["input"]}) + "\\n")
+    sys.stdout.flush()
+"""
+        self.repo = self.root / "mock-repo"
+        self.repo.mkdir()
+        sp.run(["git", "init", "-b", "main", str(self.repo)],
+               check=True, capture_output=True)
+        sp.run(["git", "-C", str(self.repo), "config", "user.email", "t@t"],
+               check=True, capture_output=True)
+        sp.run(["git", "-C", str(self.repo), "config", "user.name", "t"],
+               check=True, capture_output=True)
+        (self.repo / "agent.py").write_text(echo_script, encoding="utf-8")
+        sp.run(["git", "-C", str(self.repo), "add", "."],
+               check=True, capture_output=True)
+        sp.run(["git", "-C", str(self.repo), "commit", "-m", "init"],
+               check=True, capture_output=True)
+
+        # runtime-sources.md 声明 git_repo source
+        (self.root / "runtime-sources.md").write_text(
+            f"## git-src\n"
+            f"type: git_repo\n"
+            f"url: {self.repo}\n"
+            f"ref: main\n",
+            encoding="utf-8")
+
+        # patches/V1/agent.py (覆盖)
+        patches = self.exp / "patches" / "V1"
+        patches.mkdir(parents=True)
+        patched = """import json, sys
+for line in sys.stdin:
+    data = json.loads(line)
+    sys.stdout.write(json.dumps({"response": "patched-git:" + data["input"]}) + "\\n")
+    sys.stdout.flush()
+"""
+        (patches / "agent.py").write_text(patched, encoding="utf-8")
+        self.python = sys.executable
+
+    def _write_v1(self):
+        (self.exp / "harnesses" / "V1.md").write_text(
+            "---\n"
+            "id: V1\n"
+            "基线: 是\n"
+            "runtime_source: git-src\n"
+            "---\n"
+            "## 这是什么\ngit_repo variant。\n\n"
+            "## Patch\n\n"
+            "files:\n"
+            "  - target: agent.py\n"
+            "    source: patches/V1/agent.py\n\n"
+            f'start_command: "{self.python}" agent.py\n',
+            encoding="utf-8")
+
+    def test_run_passes_preflight_and_writes_materialized_snapshot(self):
+        """端到端: workflow.run 跑 git_repo,snapshot.json 含 commit_sha +
+        source_dir_hash + harness_patch + sandbox.type=git_clone。"""
+        self._write_v1()
+        import contextlib
+        import io as _io
+        buf = _io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            result = run(self.exp, use_llm=False)
+
+        self.assertGreater(result.ok, 0,
+                           f"run failed: {result.errors};stdout: {buf.getvalue()}")
+
+        # snapshot.json 落盘
+        snapshots_dir = self.exp / "results" / "snapshots"
+        run_dirs = list(snapshots_dir.iterdir())
+        self.assertEqual(len(run_dirs), 1)
+        v1_snap = run_dirs[0] / "V1.json"
+        self.assertTrue(v1_snap.exists())
+
+        # 字段完整性: git_repo schema 必含 commit_sha + source_dir_hash
+        data = json.loads(v1_snap.read_text(encoding="utf-8"))
+        self.assertTrue(data["snapshot_id"].startswith("snap-"))
+        self.assertEqual(data["runtime_source"]["type"], "git_repo")
+        self.assertEqual(data["runtime_source"]["name"], "git-src")
+        self.assertEqual(data["runtime_source"]["url"], str(self.repo))
+        self.assertEqual(data["runtime_source"]["ref"], "main")
+        self.assertEqual(len(data["runtime_source"]["commit_sha"]), 40)
+        self.assertTrue(
+            data["runtime_source"]["source_dir_hash"].startswith("sha256:"))
+        self.assertIsNotNone(data["harness_patch"])
+        self.assertTrue(
+            data["harness_patch"]["patch_hash"].startswith("sha256:"))
+        self.assertEqual(len(data["harness_patch"]["applied"]), 1)
+        self.assertIsNotNone(data["sandbox"])
+        self.assertEqual(data["sandbox"]["type"], "git_clone")
 
 
 if __name__ == "__main__":

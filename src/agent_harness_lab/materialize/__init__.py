@@ -1,7 +1,8 @@
 """Runtime Materialization 调度层 —— Adapter Protocol + Sandbox + dispatch。
 
-当前范围:LegacyAdapter (v0.2.0 兼容) + LocalPathAdapter (C5)。GitRepoAdapter
-留 C6;其他 type 的 variant,workflow.preflight 阶段 hard fail (不到 dispatch)。
+当前范围:LegacyAdapter (v0.2.0 兼容) + LocalPathAdapter (C5) + GitRepoAdapter (C6)。
+其他 type 的 variant(docker_image / remote_api / dev_agent 等留 M2+),
+runtime_source.py parser 阶段就拒了未知 type,本 dispatcher 不该见到。
 
 Protocol 签名采用 ctx 模式(spec §7 原 source/patch/run_id/variant_id 4-args
 偏离),让所有 adapter 共用 same signature:Legacy 不需要 source/patch,
@@ -23,12 +24,12 @@ class Sandbox:
     """一次 (variant, case) 跑时的隔离运行环境。
 
     Legacy 路径下没有物理 sandbox:type="legacy", path=None, metadata 带
-    connect 引用供 LegacyAdapter.start() 用。Materialized 路径(local_path
-    C5 / git_repo C6 实现后)下 type="copy_dir" / "git_worktree",path 指
+    connect 引用供 LegacyAdapter.start() 用。Materialized 路径下
+    type="copy_dir" (local_path) / "git_clone" (git_repo),path 指
     sandbox/<run_id>/<variant_id>/。
     """
 
-    type: str                              # "legacy" | "copy_dir" | "git_worktree"
+    type: str                              # "legacy" | "copy_dir" | "git_clone"
     path: Path | None                      # None 表示无物理 sandbox(legacy)
     start_command: str | None              # adapter 默认启动命令
     metadata: dict = field(default_factory=dict)
@@ -69,10 +70,11 @@ def adapter_for(version: Version, ctx: MaterializeContext) -> RuntimeAdapter:
     """按 version.runtime_source + ctx.runtime_sources 决定用哪个 adapter。
 
     - runtime_source=None → LegacyAdapter (v0.2.0 兼容路径)
-    - runtime_source 写了,对应 source.type=local_path → LocalPathAdapter
-    - runtime_source 写了,对应 source.type=git_repo → NotImplementedError (留 C6)
+    - runtime_source 写了,对应 source.type=local_path → LocalPathAdapter (C5)
+    - runtime_source 写了,对应 source.type=git_repo → GitRepoAdapter (C6)
     - runtime_source 名不在 ctx.runtime_sources → NotImplementedError
       (preflight 应已 hard fail,本 raise 是 defensive)
+    - 其他 source.type → NotImplementedError (理论 parser 已拒,defensive)
     """
     from agent_harness_lab.materialize.legacy import LegacyAdapter
     from agent_harness_lab.materialize.local_path import LocalPathAdapter
@@ -90,8 +92,12 @@ def adapter_for(version: Version, ctx: MaterializeContext) -> RuntimeAdapter:
         )
     if source.type == "local_path":
         return LocalPathAdapter()
+    if source.type == "git_repo":
+        from agent_harness_lab.materialize.git_repo import GitRepoAdapter
+        return GitRepoAdapter()
     raise NotImplementedError(
         f"版本 {version.version_id}:runtime_source={version.runtime_source!r} "
-        f"type={source.type} adapter 还没实现 "
-        f"(当前支持 legacy + local_path;git_repo 留 C6)"
+        f"type={source.type} 不在已实现 adapter 列表 "
+        f"(legacy / local_path / git_repo)。理论 parser 阶段已拒未知 type,"
+        f"本 raise 是 defensive"
     )
