@@ -5,8 +5,10 @@
 > 实现合同(implementation contract)。
 >
 > Target: **v0.3.0** | Branch: **`runtime-materialization-mvp`**
-> Date: 2026-05-22
-> Status: **spec 阶段(代码未实现);C1 commit 把本 spec 落盘 + 后续 C2-C7 实现**
+> Date: 2026-05-22 (spec),2026-05-23 (M1 完整实施)
+> Status: **M1 已实现 (v0.3.0)** —— C1-C7 全部完成,177 → 208 tests 全绿
+> (含 `-W error::ResourceWarning` 模式),legacy / local_path / git_repo
+> 三 path 都跑通,sandbox cleanup flag 上线。
 
 ---
 
@@ -355,15 +357,15 @@ with tempfile.TemporaryDirectory() as repo:
 按主题分 7 commits(在 `runtime-materialization-mvp` 分支)。每 commit 后
 `compileall` + `pytest` 必须 pass。
 
-| # | Subject | 内容 | 安全 checkpoint |
+| # | Subject | 内容 | Status |
 |---|---------|------|------|
-| **C1** | `docs: add v0.3.0 M1 implementation spec` | 本 spec 落到 `docs/runtime-materialization-m1-spec.md` | 文档 only,无 risk |
-| **C2** | `feat(parser): runtime_source.py + patch.py + V*.md ext` | runtime_source / patch parser + V*.md frontmatter 扩展。tests 4/5/6/7。**legacy 全绿** | parser 仅扩字段,不动行为 |
-| **C3** | `refactor: RuntimeAdapter abstraction + LegacyAdapter` | RuntimeAdapter 抽象基类 + 注册表 + LegacyAdapter wrap agentconn。改 workflow.py 用 adapter dispatch(仅 legacy 路径),改 runner.py 接受 AgentSession。**现有 57 tests 全绿**(这是 refactor,行为不变) | 关键 checkpoint:legacy 完全等价 |
-| **C4** | `feat(snapshot): RuntimeSnapshot + persistence + run-id->snapshot-id` | snapshot.py + workflow 写 snapshots/ 目录 + run-*.json 加 snapshot_id。legacy path 写 `snapshot_id: "legacy"`。tests 17/18/22 | snapshot 加字段,legacy 行为不变(仅多两个产出) |
-| **C5** | `feat(materialize): local_path adapter` | LocalPathAdapter + tests 8/9/10/20 | local_path materialize 上线 |
-| **C6** | `feat(materialize): git_repo adapter (clone mode)` ✅ | GitRepoAdapter (clone + checkout + commit_sha + source_dir_hash 跟 C5 一致) + tests 11/12/13/20 + e2e 21/19。worktree mode 留 M2+ 优化(spec 原案是 worktree,实际选 clone 是因为 simpler + sandbox 隔离 strong) | git_repo materialize 上线 + e2e 验证 |
-| **C7** | `feat(cli): --cleanup-sandboxes flag + docs` | cli.py 加 flag, docs/file-formats.md + runtime-materialization.md 标 M1 实现, product-definition.md 更新 | docs 收尾 + flag |
+| **C1** ✅ | `docs: add v0.3.0 M1 implementation spec` (d5939e5) | 本 spec 落到 `docs/runtime-materialization-m1-spec.md` | 完成 |
+| **C2** ✅ | `feat(parser): add runtime source and patch parsing` (7d2db58) | runtime_source / patch parser + V*.md frontmatter 扩展。tests 4/5/6/7。legacy 全绿 | 完成 |
+| **C3** ✅ | `refactor: add RuntimeAdapter abstraction and LegacyAdapter` (d45c629) | RuntimeAdapter Protocol + LegacyAdapter wrap agentconn。改 workflow.py 用 adapter dispatch,改 runner.py 接受 AgentSession。57 v0.2.0 tests 全绿 | 完成 |
+| **C4** ✅ | `feat(snapshot): add RuntimeSnapshot persistence` (d447afb + cleanup ed64a11) | snapshot.py + workflow 写 snapshots/ 目录 + run-*.json 加 snapshot_id。legacy path 写 `snapshot_id: "legacy"`。tests 17/18/22 | 完成 |
+| **C5** ✅ | `feat(materialize): add local_path adapter with source_dir_hash` (a037324) | LocalPathAdapter + source_dir_hash (review 加入) + _SandboxCliSession (shell=False) + adapter_for(v, ctx) + workflow/runner sequence 重构 (sandbox per variant) + path traversal 防御 + tests 8/9/10/20 | 完成 |
+| **C6** ✅ | `feat(materialize): add git_repo adapter` (d70615e) | GitRepoAdapter clone mode (clone + checkout + commit_sha + source_dir_hash 跟 C5 一致) + tests 11/12/13/20 + e2e 21/19。worktree mode 留 M2+ 优化 | 完成 |
+| **C7** ✅ | `feat(cli): --cleanup-sandboxes flag` + `docs(m1): collateral` (2 commits) | cli.py 加 flag + 3 adapter teardown signature (sandbox, cleanup) + docs 5 处全收尾 (file-formats / runtime-materialization / product-definition / m1-spec / README + README_CN) | 完成 |
 
 **M1 release 时**:merge `runtime-materialization-mvp` → `main`,打 `v0.3.0` annotated tag,
 release note 同时补 v0.2.0 留下的 release note(一并发)。

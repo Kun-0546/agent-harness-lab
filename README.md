@@ -28,7 +28,7 @@ Each experiment is a self-contained folder — its program, harness variants, ca
 
 - **Manual** — you design harness variants and the experiment; `ahl` validates, runs, scores, compares. **v1, done.**
 - **Co-pilot** — an external coding agent (Claude Code / Cursor / Codex) drafts variants and the experiment package from your `brief.md`; you confirm anchors. **v2-minimal, current branch.**
-- **Auto** — agents iterate harnesses inside rules, budgets, and approval gates; escalate to you on anomalies. **Future mode; depends on Runtime Materialization (`docs/runtime-materialization.md`) maturing.**
+- **Auto** — agents iterate harnesses inside rules, budgets, and approval gates; escalate to you on anomalies. **Future mode.** Runtime Materialization M1 has shipped in v0.3.0 (`local_path` + `git_repo`; see [`docs/runtime-materialization.md`](docs/runtime-materialization.md) and [`docs/runtime-materialization-m1-spec.md`](docs/runtime-materialization-m1-spec.md)); Auto mode itself still depends on calibration + approval gates (M2+).
 
 ## Install
 
@@ -66,12 +66,12 @@ By default `run` and `score` use built-in stubs (a canned simulator and a hash-b
 
 - `depends_on` (seeding a case's opening context from a prior case) is parsed and shown, but `run` does not use it yet.
 - `run` / `score` default to stubs; real scoring needs `--llm` and API keys.
-- Only the "simulated" conversation mode is implemented; replay and scripted modes, the Auto mode, environment snapshots, and noise/trial handling are not built yet.
+- Only the "simulated" conversation mode is implemented; replay and scripted modes, the Auto mode (with calibration and approval gates), and noise/trial handling are not built yet.
 - No polished case study published yet — treat this as an architecture being proposed.
 
-On the `v2-agent-drafted-lab` branch (the Co-pilot mode track), `ahl draft` opens a scaffolded authoring workspace for an **external coding agent**. The agent reads `brief.md` and authors `program.md` / `harnesses/` / `cases/` / `rubric.md` / `simulator.md`; `ahl` itself does not call a model to draft them. `ahl review` then produces an auditable `review.md` (permissive — marks any missing piece as "未起草"). See [`docs/v2-minimal-spec.md`](docs/v2-minimal-spec.md) (implementation slice) and [`docs/agent-authoring-guide.md`](docs/agent-authoring-guide.md) (agent-facing guide).
+In Co-pilot mode, `ahl draft` opens a scaffolded authoring workspace for an **external coding agent**. The agent reads `brief.md` and authors `program.md` / `harnesses/` / `cases/` / `rubric.md` / `simulator.md`; `ahl` itself does not call a model to draft them. `ahl review` then produces an auditable `review.md` (permissive — marks any missing piece as "未起草"). See [`docs/v2-minimal-spec.md`](docs/v2-minimal-spec.md) (implementation slice) and [`docs/agent-authoring-guide.md`](docs/agent-authoring-guide.md) (agent-facing guide).
 
-The next-stage core capability — making each run reproducible against a specific harness × runtime — is specified in [`docs/runtime-materialization.md`](docs/runtime-materialization.md) (design only, not implemented).
+Making each run reproducible against a specific harness × runtime — Runtime Materialization — has shipped its M1 in v0.3.0 (`local_path` + `git_repo` + snapshot persistence + `--cleanup-sandboxes`). See [`docs/runtime-materialization.md`](docs/runtime-materialization.md) and [`docs/runtime-materialization-m1-spec.md`](docs/runtime-materialization-m1-spec.md). Replay/scripted modes, Auto, approval gates, and calibration are still future work.
 
 ## History
 

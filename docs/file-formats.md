@@ -151,6 +151,146 @@ id: V1
 
 `run` / `score` / `compare` 的产出,工具写、PM 读:
 
-- `run-<时间>.json` —— 一次 run 的对话(每条 = 版本 × case 的多轮 transcript)。
+- `run-<时间>.json` —— 一次 run 的对话(每条 = 版本 × case 的多轮 transcript;
+  每条 record 含 `snapshot_id` 字段指向对应 `results/snapshots/<run_id>/<vid>.json`,
+  legacy 路径固定 `"legacy"`,materialized 路径 `"snap-<run_id>-<vid>"`)。
 - `score-<时间>.json` —— 一次打分(每条 case 的各维度分 + 加权总分,带用的哪版 rubric、哪个评分器)。
 - `compare-<时间>.md` —— 一次对比报告(版本总分、跟基线的差、哪个维度退化)。
+- `snapshots/<run_id>/<vid>.json` —— 一次 run 内每个 variant 的运行环境指纹
+  (v0.3.0 加,详见下面 §Runtime Materialization)。
+
+---
+
+## Runtime Materialization (v0.3.0)
+
+v0.3.0 加的能力:把 harness variant 应用到具体 runtime source (本地目录 /
+git 仓库) 后跑,留下可复现指纹。详细设计见 `runtime-materialization.md` +
+`runtime-materialization-m1-spec.md`。下面只列**文件格式**。
+
+### runtime-sources.md (工作目录根,可选)
+
+声明可被 variant 引用的 runtime sources。文件不存在 → 所有 variant 走 legacy
+(用 connect.md);存在但 0 个 source → 报错。
+
+```markdown
+# runtime sources
+
+## openmanus-main
+type: git_repo
+url: https://github.com/example/openmanus.git
+ref: main
+
+## local-aider
+type: local_path
+path: <home>/projects/aider
+```
+
+约束:
+- 二级 heading `## <name>` = source name (必 unique)
+- `type:` ∈ `{local_path, git_repo}` (其他 type 留 M2+)
+- `local_path`:必 `path:`
+- `git_repo`:必 `url:` + `ref:` (ref 可 commit / branch / tag)
+- 不识别字段:忽略 + warning
+
+### harnesses/V*.md 加 `runtime_source` 字段 + `## Patch` 段 (可选)
+
+```markdown
+---
+id: V2
+基线: 否
+runtime_source: openmanus-main
+---
+
+## 这是什么
+极简模式的 system prompt。
+
+## Patch
+
+files:
+  - target: prompts/system.md
+    source: patches/V2/system.md
+  - target: config/tools.yaml
+    source: patches/V2/tools.yaml
+
+env:
+  HARNESS_MAX_DEPTH: "5"
+
+start_command: python -m openmanus.agent
+```
+
+约束:
+- `runtime_source:` 是 frontmatter 可选字段
+  - 不写 → variant 走 legacy (用 connect.md + agentconn 的「类型」「配置」段)
+  - 写了但 source 名不在 runtime-sources.md → preflight WorkflowError
+- `## Patch` 段 (仅 `runtime_source` 写了才解析;否则忽略):
+  - `files:` 列表 — `target:` (相对 source root) + `source:` (相对 experiment root,
+    通常 `patches/<vid>/`)。**target / source 都做 path traversal 防御** (越界
+    抛 RuntimeError / ValueError,不允许写出 sandbox 或 读 experiment 外)
+  - `env:` map — value 用字符串避免类型歧义
+  - `start_command:` 启动命令 (M1 必填,不假设默认)
+- patches 文件存放:`experiments/<id>/patches/<vid>/<filename>`,纯文本整文件替换。
+
+### results/snapshots/<run_id>/<variant_id>.json (snapshot 指纹)
+
+每次 `ahl run` 给每个 variant 写一份 snapshot,记录跑这次用的运行环境指纹。
+**legacy 路径也写**,字段精简但保持证据链统一。
+
+**Legacy 路径** (variant 无 `runtime_source`):
+```json
+{
+  "snapshot_id": "legacy",
+  "run_id": "run-20260523-103045",
+  "variant_id": "V1",
+  "experiment": "001-foo",
+  "created_at": "2026-05-23T10:30:45+00:00",
+  "runtime_source": {
+    "type": "legacy_connect",
+    "connect_md_hash": "sha256:..."
+  },
+  "harness_patch": null,
+  "sandbox": null,
+  "environment": {"python_version": "3.14.0", "os": "...", "captured_at": "..."}
+}
+```
+
+**Materialized 路径** (`runtime_source` 写了):
+```json
+{
+  "snapshot_id": "snap-run-20260523-103045-V2",
+  "run_id": "run-20260523-103045",
+  "variant_id": "V2",
+  "experiment": "001-foo",
+  "created_at": "2026-05-23T10:30:45+00:00",
+  "runtime_source": {
+    "type": "local_path",
+    "name": "local-aider",
+    "path": "<home>/projects/aider",
+    "source_dir_hash": "sha256:<pre-patch raw source 指纹>"
+  },
+  "harness_patch": {
+    "applied": [
+      {"target_path": "prompts/system.md", "source_path": "patches/V2/system.md", "hash": "sha256:..."}
+    ],
+    "env": {"HARNESS_MAX_DEPTH": "5"},
+    "start_command": "python -m openmanus.agent",
+    "patch_hash": "sha256:<files+env+start_command 的整体 hash>"
+  },
+  "sandbox": {
+    "type": "copy_dir",
+    "path": "sandbox/run-20260523-103045/V2",
+    "start_command": "python -m openmanus.agent"
+  },
+  "environment": {"python_version": "...", "os": "...", "captured_at": "..."}
+}
+```
+
+git_repo 多 `url` / `ref` / `commit_sha` 三个字段,`sandbox.type=git_clone`。
+详细各 source 类型 schema 见 `runtime-materialization-m1-spec.md` §2.1。
+
+### `ahl run --cleanup-sandboxes` (可选 flag)
+
+默认: keep sandbox dir (sandbox 是证据链一部分,默认保留方便事后调查)。
+
+显式 `--cleanup-sandboxes`:跑完 finally 块对每个 `sandbox.path` 做 `shutil.rmtree`。
+snapshot.json 不受影响 (snapshot 是 evidence,不删)。legacy variant 无 sandbox
+path,该 flag 对它们无效。
