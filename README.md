@@ -27,7 +27,7 @@ Each experiment is a self-contained folder — its program, harness variants, ca
 `ahl` exposes three modes (full detail in [`docs/product-modes.md`](docs/product-modes.md)):
 
 - **Manual** — you design harness variants and the experiment; `ahl` validates, runs, scores, compares. **v1, done.**
-- **Co-pilot** — an external coding agent (Claude Code / Cursor / Codex) drafts variants and the experiment package from your `brief.md`; you confirm anchors. **v2-minimal, current branch.**
+- **Co-pilot** — an external coding agent (Claude Code / Cursor / Codex) drafts variants and the experiment package from your `brief.md`; you confirm anchors. **v2-minimal, implemented.**
 - **Auto** — agents iterate harnesses inside rules, budgets, and approval gates; escalate to you on anomalies. **Future mode.** Runtime Materialization M1 has shipped in v0.3.0 (`local_path` + `git_repo`; see [`docs/runtime-materialization.md`](docs/runtime-materialization.md) and [`docs/runtime-materialization-m1-spec.md`](docs/runtime-materialization-m1-spec.md)); Auto mode itself still depends on calibration + approval gates (M2+).
 
 ## Install
