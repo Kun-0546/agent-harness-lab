@@ -16,14 +16,20 @@ from agent_harness_lab.brief import parse_brief
 from agent_harness_lab.comparator import compare_scores
 from agent_harness_lab.connect import parse_connect
 from agent_harness_lab.grader import llm_grader, score_run, stub_grader
+from agent_harness_lab.materialize import MaterializeContext, adapter_for
 from agent_harness_lab.program import Program, parse_program
 from agent_harness_lab.rubric import parse_rubric
 from agent_harness_lab.runner import run_experiment
+from agent_harness_lab.runtime_source import (
+    parse_runtime_sources,
+    validate_variant_source_refs,
+)
 from agent_harness_lab.simulator import (
     make_llm_simulator,
     parse_simulator,
     stub_simulator,
 )
+from agent_harness_lab.snapshot import build_snapshot, write_snapshot
 from agent_harness_lab.testset import TestCase, load_testset
 from agent_harness_lab.version import Version, load_versions
 
@@ -124,7 +130,7 @@ def run_preflight(program: Program, versions: list[Version],
                   cases: list[TestCase]) -> list[str]:
     """run 前的聚合校验。返回带来源标注的问题清单;空清单 = 可以跑。
 
-    把 ahl show / versions / cases 各自能查到的问题,在跑之前一次性拦下。
+    把 ahl show / harnesses / cases 各自能查到的问题,在跑之前一次性拦下。
     最典型的是 case 段名写错(「## 初始输入」而非「## 起始输入」),起始输入
     解析成空串,run 不报错、直接把空输入发给 agent。program 没填、版本缺
     「这是什么」、基线数量不对同理 —— show 里看得到的,run 不该绕过。
@@ -139,10 +145,22 @@ def run_preflight(program: Program, versions: list[Version],
     return problems
 
 
-def run(exp_dir: Path, use_llm: bool) -> RunResult:
+def run(exp_dir: Path, use_llm: bool,
+        cleanup_sandboxes: bool = False) -> RunResult:
     """跑实验:加载 → 校验 → 每个 harness variant 过 cases → 存对话。
 
     program / 版本 / case / 基线数量 / 接入配置 任一不过,都抛 WorkflowError。
+
+    Runtime Materialization preflight:
+    - parse workspace 根的 runtime-sources.md (不存在返回空 list)
+    - cross-validate variant.runtime_source 引用是否都在 sources 里
+    - 当前支持 legacy + local_path + git_repo;docker_image / remote_api /
+      dev_agent 留 M2+ (parser 阶段就拒未知 type)
+    - 构造 MaterializeContext 传给 runner;runner 通过 adapter dispatch
+
+    cleanup_sandboxes:默认 False (keep sandbox,sandbox 是证据链)。True 时
+    跑完 finally 块对每个 sandbox.path 做 shutil.rmtree;legacy 无 sandbox
+    path → no-op。
     """
     program_path = exp_dir / "program.md"
     if not program_path.exists():
@@ -156,15 +174,61 @@ def run(exp_dir: Path, use_llm: bool) -> RunResult:
     problems = run_preflight(program, versions, cases)
     if problems:
         raise WorkflowError(
-            "跑不了,先修下面的问题(ahl show / versions / cases 可单独查):\n  - "
+            "跑不了,先修下面的问题(ahl show / harnesses / cases 可单独查):\n  - "
             + "\n  - ".join(problems))
 
     # 接入:版本自带的优先;没有就回退工作区根的 connect.md。
     # connect.md 在 project root,从 exp_dir 反推(experiments/<编号>/ 的上两级),
     # 不靠当前 shell 在哪。
-    connect_path = exp_dir.parents[1] / "connect.md"
+    workspace_root = exp_dir.parents[1]
+    connect_path = workspace_root / "connect.md"
     connect = parse_connect(connect_path) if connect_path.exists() else None
-    needs_global = [v.version_id for v in versions if v.connect is None]
+
+    # === Runtime Materialization preflight ===
+    # parse 错误(unknown type / duplicate / unknown field)由 _safe_call 翻成
+    # WorkflowError "runtime-sources.md 解析失败:..."
+    sources_path = workspace_root / "runtime-sources.md"
+    runtime_sources = _safe_call(
+        "runtime-sources.md", parse_runtime_sources, sources_path)
+
+    # variant.runtime_source 引用必须在 sources 里(legacy None 跳过)
+    ref_problems = validate_variant_source_refs(
+        [(v.version_id, v.runtime_source) for v in versions],
+        runtime_sources,
+    )
+    if ref_problems:
+        raise WorkflowError(
+            "runtime_source 引用有问题:\n  - " + "\n  - ".join(ref_problems))
+
+    # 当前支持 legacy + local_path + git_repo;其他 type (docker_image / remote_api
+    # / dev_agent 留 M2+) 还没 adapter → hard fail。source 名错(ref_problems)
+    # 已上面 catch;这里只针对 type 不支持。runtime_source.py parser 当前只接受
+    # local_path / git_repo,所以本 block 实际上空 fall-through;保留作 future-proof。
+    sources_by_name = {s.name: s for s in runtime_sources}
+    _SUPPORTED_TYPES = {"local_path", "git_repo"}
+    unsupported = []
+    for v in versions:
+        if v.runtime_source is None:
+            continue
+        src = sources_by_name.get(v.runtime_source)
+        if src is None:
+            continue  # 已被 ref_problems catch
+        if src.type in _SUPPORTED_TYPES:
+            continue
+        unsupported.append(
+            f"版本 {v.version_id}:runtime_source={v.runtime_source!r} "
+            f"(type={src.type}) 还没 adapter "
+            f"(当前支持 legacy + local_path + git_repo)")
+    if unsupported:
+        raise WorkflowError(
+            "runtime_source path not implemented yet:\n  - "
+            + "\n  - ".join(unsupported))
+    # patch validate (start_command 必填 / source 文件存在等) 由 run_preflight
+    # 的 v.validate() → patch.validate() 链路统一抓,不再 workflow 内重复
+
+    # Legacy connect fallback 校验:无 runtime_source + 无 variant.connect → 要全局 connect.md
+    needs_global = [v.version_id for v in versions
+                    if v.connect is None and v.runtime_source is None]
     if needs_global:
         if connect is None:
             raise WorkflowError(
@@ -198,11 +262,63 @@ def run(exp_dir: Path, use_llm: bool) -> RunResult:
     # 这行得在 run_experiment 之前打 —— 它后面紧跟 runner 现打的逐条进度
     print(f"实验:{exp_dir.name}  {len(versions)} 版本 × {len(cases)} case,"
           f"多轮跑({sim_name})")
-    runs = run_experiment(connect, versions, cases, simulator)
+
+    # 构造 ctx + per variant 走 lifecycle:adapter dispatch → materialize → snapshot
+    run_id = f"run-{time.strftime('%Y%m%d-%H%M%S')}"
+    ctx = MaterializeContext(
+        run_id=run_id,
+        experiment_dir=exp_dir,
+        fallback_connect=connect,
+        runtime_sources=runtime_sources,
+    )
+
+    # per variant lifecycle:adapter → materialize → snapshot → ...
+    # - materialize 失败 hard fail (spec §B.5 Q6):materialized adapter 不假装能跑
+    # - legacy materialize 是 no-op,sandbox.path=None,不会失败
+    # - snapshot 是关键证据(spec §3 字面契约 + materialized 路径必填 hash):
+    #   写失败 hard fail 整个 run
+    # - sandbox 是 per variant (不 per case),跨 case 复用;teardown 在 run 全
+    #   跑完 finally 块 per variant (M1 默认 no-op = keep,C7 加 flag 后才删)
+    from agent_harness_lab.materialize import RuntimeAdapter, Sandbox
+    adapters_map: dict[str, RuntimeAdapter] = {}
+    sandboxes_map: dict[str, Sandbox] = {}
+    snapshots_map: dict[str, str] = {}
+    for v in versions:
+        adapter = adapter_for(v, ctx)
+        adapters_map[v.version_id] = adapter
+        try:
+            sandbox = adapter.materialize(v, ctx)
+        except Exception as e:  # noqa: BLE001
+            raise WorkflowError(
+                f"materialize 失败 (variant {v.version_id}):{e}") from e
+        sandboxes_map[v.version_id] = sandbox
+        try:
+            snap = build_snapshot(v, ctx, adapter, sandbox)
+            write_snapshot(snap, exp_dir)
+        except OSError as e:
+            raise WorkflowError(
+                f"snapshot 写失败 (variant {v.version_id}):{e}") from e
+        snapshots_map[v.version_id] = snap.snapshot_id
+
+    try:
+        runs = run_experiment(versions, cases, simulator,
+                              adapters_map, sandboxes_map, snapshots_map)
+    finally:
+        # per variant teardown。cleanup=True (来自 --cleanup-sandboxes flag) 时
+        # LocalPathAdapter / GitRepoAdapter 会 shutil.rmtree(sandbox.path);
+        # LegacyAdapter no-op (sandbox.path=None)。teardown 失败不该 fail run。
+        for v in versions:
+            sb = sandboxes_map.get(v.version_id)
+            if sb is not None:
+                try:
+                    adapters_map[v.version_id].teardown(
+                        sb, cleanup=cleanup_sandboxes)
+                except Exception:  # noqa: BLE001
+                    pass
 
     results_dir = exp_dir / "results"
     results_dir.mkdir(exist_ok=True)
-    out_path = results_dir / f"run-{time.strftime('%Y%m%d-%H%M%S')}.json"
+    out_path = results_dir / f"{run_id}.json"
     out_path.write_text(
         json.dumps([r.__dict__ for r in runs], ensure_ascii=False, indent=2),
         encoding="utf-8")

@@ -27,8 +27,8 @@
 `ahl` 对外暴露三种模式（完整说明见 [`docs/product-modes.md`](docs/product-modes.md)）：
 
 - **Manual** —— 你自己设计 harness variants 和实验；`ahl` 校验、运行、评分、比较。**v1，已完成。**
-- **Co-pilot** —— 外层 coding agent（Claude Code / Cursor / Codex）据你的 `brief.md` 起草 variants 和实验包；关键节点你确认。**v2-minimal，当前分支。**
-- **Auto** —— Agent 在规则、预算、审核门槛下自动迭代 harness；异常时喊你。**未来模式，依赖 Runtime Materialization（见 [`docs/runtime-materialization.md`](docs/runtime-materialization.md)）成熟。**
+- **Co-pilot** —— 外层 coding agent（Claude Code / Cursor / Codex）据你的 `brief.md` 起草 variants 和实验包；关键节点你确认。**v2-minimal，已实现。**
+- **Auto** —— Agent 在规则、预算、审核门槛下自动迭代 harness；异常时喊你。**未来模式。** Runtime Materialization M1 已在 v0.3.0 落地（`local_path` + `git_repo`；见 [`docs/runtime-materialization.md`](docs/runtime-materialization.md) 和 [`docs/runtime-materialization-m1-spec.md`](docs/runtime-materialization-m1-spec.md)）；Auto 模式本身仍依赖 calibration + approval gates（M2+）。
 
 ## 安装
 
@@ -66,12 +66,12 @@ ahl run 001 ; ahl score 001 ; ahl compare 001
 
 - `depends_on`（用前一个 case 跑完的对话给后一个 case 当起始上下文）已解析、也会显示，但 `run` 还没用它。
 - `run` / `score` 默认走桩；真实打分要 `--llm` 和 API key。
-- 只实现了"模拟"对话模式；回放和固定模式、Auto mode、环境快照、噪声/trial 处理，都还没做。
+- 只实现了"模拟"对话模式；回放和固定模式、Auto mode（含 calibration 和 approval gates）、噪声/trial 处理，都还没做。
 - 还没有打磨成公开的 case study —— 当前把它当成一个被提出的架构。
 
-在 `v2-agent-drafted-lab` 分支（Co-pilot mode 的实现轨道），`ahl draft` 为**外层 coding agent** 开一个 scaffolded authoring workspace——agent 据 `brief.md` 起草 `program.md` / `harnesses/` / `cases/` / `rubric.md` / `simulator.md`；`ahl` 自己**不调模型**起草。`ahl review` 再出可审的 `review.md`（宽松：缺什么标"未起草"）。实现切片见 [`docs/v2-minimal-spec.md`](docs/v2-minimal-spec.md)，agent 起草指南见 [`docs/agent-authoring-guide.md`](docs/agent-authoring-guide.md)。
+在 Co-pilot 模式下，`ahl draft` 为**外层 coding agent** 开一个 scaffolded authoring workspace——agent 据 `brief.md` 起草 `program.md` / `harnesses/` / `cases/` / `rubric.md` / `simulator.md`；`ahl` 自己**不调模型**起草。`ahl review` 再出可审的 `review.md`（宽松：缺什么标"未起草"）。实现切片见 [`docs/v2-minimal-spec.md`](docs/v2-minimal-spec.md)，agent 起草指南见 [`docs/agent-authoring-guide.md`](docs/agent-authoring-guide.md)。
 
-下一阶段的核心能力——让每次 run 都能可复现到具体的 harness × runtime 组合——见 [`docs/runtime-materialization.md`](docs/runtime-materialization.md)（**设计 spec，尚未实现**）。
+让每次 run 都可复现到具体的 harness × runtime 组合——Runtime Materialization——**M1 已在 v0.3.0 落地**（`local_path` + `git_repo` + snapshot persistence + `--cleanup-sandboxes`）；见 [`docs/runtime-materialization.md`](docs/runtime-materialization.md) 和 [`docs/runtime-materialization-m1-spec.md`](docs/runtime-materialization-m1-spec.md)。回放/固定模式、Auto、approval gates、calibration 仍是未来工作。
 
 ## 历史
 

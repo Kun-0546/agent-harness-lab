@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
 import os
 import sys
 import tempfile
@@ -109,6 +110,30 @@ class TestEndToEnd(unittest.TestCase):
         self.assertIn("V1", comp.report_text)
         self.assertIn("V2", comp.report_text)
         self.assertTrue(comp.out_path.exists())
+
+        # C4:run-*.json 每条 record 有 snapshot_id;legacy 路径固定 "legacy"
+        run_data = json.loads(run.out_path.read_text(encoding="utf-8"))
+        self.assertEqual(len(run_data), 2)
+        for rec in run_data:
+            self.assertIn("snapshot_id", rec)
+            self.assertEqual(rec["snapshot_id"], "legacy")
+
+        # C4:每个 variant 产出 snapshot.json,落 results/snapshots/<run_id>/<vid>.json
+        run_id = run.out_path.stem   # "run-<timestamp>"
+        snap_dir = self.exp / "results" / "snapshots" / run_id
+        self.assertTrue(snap_dir.is_dir(), f"snapshots dir not found: {snap_dir}")
+        snap_files = sorted(p.name for p in snap_dir.glob("*.json"))
+        self.assertEqual(snap_files, ["V1.json", "V2.json"])
+
+        # snapshot.json 内容:type=legacy_connect + connect_md_hash 是 sha256
+        v1_snap = json.loads((snap_dir / "V1.json").read_text(encoding="utf-8"))
+        self.assertEqual(v1_snap["snapshot_id"], "legacy")
+        self.assertEqual(v1_snap["variant_id"], "V1")
+        self.assertEqual(v1_snap["runtime_source"]["type"], "legacy_connect")
+        self.assertTrue(
+            v1_snap["runtime_source"]["connect_md_hash"].startswith("sha256:"))
+        self.assertIsNone(v1_snap["harness_patch"])
+        self.assertIsNone(v1_snap["sandbox"])
 
     def test_cli_run_score_compare(self) -> None:
         """CLI 层:走 cli.main 真入口(argparse + cmd_ 包装)。"""

@@ -112,7 +112,7 @@
 
 ### 当前状态
 
-**v2-minimal 分支（`v2-agent-drafted-lab`）**，已在做：
+**v2-minimal**（Co-pilot 模式，已合入 main），已实现：
 - `ahl draft` scaffold-only：建实验目录 + brief.md 模板，不调模型。
 - `ahl review`：宽松出 review.md，不抛错。
 - 集中式 provenance：写在 review.md 的「来源」段，不进各文件 frontmatter（per-file frontmatter 留到 v2.5）。

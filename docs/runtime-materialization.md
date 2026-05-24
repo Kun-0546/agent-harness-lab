@@ -1,8 +1,17 @@
 # Agent Harness Lab · Runtime Materialization Spec
 
-> 本文是**设计 spec，不是实现**。目的是定义 Agent Harness Lab 下一阶段的核心底层能力——**Harness Runtime Materialization & Snapshotting**——的对象、流程、文件格式与策略表。
-> 代码层面**当前不实现**。这一档要在 v2-minimal 稳定之后单独立项，对应 `design-v0.4.1.md` §9 路线图的 v2.5 / v3。
-> 日期：2026-05-21。
+> 本文是**总设计 spec**,定义 Agent Harness Lab 的核心底层能力——**Harness
+> Runtime Materialization & Snapshotting**——的对象、流程、文件格式与策略表。
+>
+> **M1 已实现 (v0.3.0, 2026-05-23)**:`local_path` + `git_repo` (clone mode) +
+> snapshot persistence (含 source_dir_hash / patch_hash / commit_sha 可复现指纹) +
+> sandbox per variant lifecycle + path traversal 防御 + `--cleanup-sandboxes` flag。
+> 实现合同见 `runtime-materialization-m1-spec.md`(实际 commits: d5939e5 → C7)。
+>
+> **M2+ 留**:`docker_image` / `remote_api` / `dev_agent` source、git worktree mode
+> 优化、calibration、Auto mode + approval gates。
+>
+> 日期:2026-05-21 (设计),2026-05-23 (M1 完成)。
 
 ---
 
@@ -367,11 +376,16 @@ Snapshot 字段在不同 source 类型下不全是必填——能记多全记多
 
 实装时建议分三档：
 
-**M1：MVP（local_path + git_repo）**
-- 两种最常用 source 各起一个 adapter。
-- Snapshot 落盘 + run result 引用 snapshot_id。
-- 现有 4 种 connect 接入注册为 "no-materialize" adapter 保持向后兼容。
-- e2e 测试：用 git_repo source 起两个 variant，能跑通 `ahl run / score / compare`。
+**M1:MVP (local_path + git_repo)** ✅ **已实现 (v0.3.0, 2026-05-23)**
+- 两种最常用 source 各起一个 adapter (`LocalPathAdapter` / `GitRepoAdapter`)。
+- Snapshot 落盘 (含 source_dir_hash / patch_hash / commit_sha 可复现指纹) +
+  run-*.json 引用 snapshot_id。
+- 现有 4 种 connect 接入注册为 `LegacyAdapter` 保持 v0.2.0 行为 100% 等价。
+- e2e 测试覆盖 legacy / local_path / git_repo 三 path,208 tests 全绿
+  (含 `-W error::ResourceWarning` strict 模式)。
+- 实现合同见 `runtime-materialization-m1-spec.md`,M1 偏离 spec 处:
+  git_repo 走 clone mode (sandbox.type=`git_clone`) 而非 spec 的 worktree mode
+  (worktree 留 M2+ 优化)。
 
 **M2：docker_image + remote_api**
 - 容器化 / API source 的 adapter。

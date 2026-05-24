@@ -214,21 +214,28 @@ Run mode 定义实验过程中「用户侧输入」如何产生。它属于 Expe
 
 ## 8. Runtime Materialization — 下一阶段核心主题
 
-当前 v2-minimal 已经解决 authoring + review + run/score/compare。下一阶段最重要的底层能力是：
+> **v0.3.0 (2026-05-23) M1 已实现 `local_path` + `git_repo`**。详细实现合同见
+> `runtime-materialization-m1-spec.md`,文件格式见 `file-formats.md` §Runtime
+> Materialization,总设计 spec 见 `runtime-materialization.md`。
+
+v2-minimal 已经解决 authoring + review + run/score/compare。Runtime Materialization
+是 v0.3.0 之后持续推进的核心底层能力:
 
 > **Harness Runtime Materialization & Snapshotting**
 
-不同 runtime source 需要不同 materialization 策略：
+不同 runtime source 需要不同 materialization 策略:
 
-| Runtime Source | Materialization Strategy |
-|---|---|
-| local path | copy directory / apply patch |
-| git repo | git clone / worktree / checkout commit / apply patch |
-| docker image | start isolated container / mount harness config |
-| remote API | logical sandbox via config / session / model version |
-| existing dev agent | dev-machine sandbox / workspace branch / session isolation |
+| Runtime Source | Materialization Strategy | Status |
+|---|---|---|
+| local path | copy directory / apply patch | ✅ v0.3.0 |
+| git repo | git clone / checkout commit / apply patch | ✅ v0.3.0 (clone mode;worktree 留 M2+) |
+| docker image | start isolated container / mount harness config | 留 M2 |
+| remote API | logical sandbox via config / session / model version | 留 M2 |
+| existing dev agent | dev-machine sandbox / workspace branch / session isolation | 留 M3 |
 
-完整 spec、5 种 source 的详细策略、与现有 `connect.md` / `version.connect` 字段如何过渡，见 `runtime-materialization.md`。**spec 阶段，当前不实现。**
+每次 materialize 落 snapshot.json,含 `source_dir_hash` (pre-patch raw source 指纹)
++ `patch_hash` (files+env+start_command) + `commit_sha` (git_repo) 等可复现指纹,
+配合 `--cleanup-sandboxes` flag 控 sandbox 留删。
 
 ---
 
