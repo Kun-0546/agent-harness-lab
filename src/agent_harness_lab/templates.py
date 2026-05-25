@@ -117,11 +117,12 @@ WALKTHROUGH_TEXT = """Agent Harness Lab — 9 步标准产品流程
           - auto            未来模式,依赖 calibration + approval gates
                             (M2+);--mode auto 当前报 not implemented
 
-  Step 3  Declare runtime
-          告诉 AHL 你的 agent 在哪:
-          - 本地源码(local_path)     → runtime-sources.md
-          - Git repo(git_repo)        → runtime-sources.md
-          - 已经在跑的 agent(legacy)  → connect.md
+  Step 3  Declare runtime boundary and evidence level
+          agent 在哪?harness 在哪?2×2 决定 evidence 强度
+          (strong / medium / weak)。Local agent + Local harness = strong;
+          Cloud agent 默认 weak,除非补 deployment evidence。
+          Co-pilot 模式下 coding agent 通过对话按需在 materials/ 下整理
+          runtime / harness / cloud evidence。详见 docs/product-walkthrough.md Step 3。
 
   Step 4  Create experiment
           ahl new <name>                 默认 setup mode=copilot
@@ -249,5 +250,35 @@ api-docs.md
 
 > 这是一份**产品约定**,coding agent 应按 `locked.md` 自律。
 > AHL 当前**不做强制锁定** (写保护 / git hook / patch validation),留 M2+。
+
+## Runtime / Harness Evidence (按需,Co-pilot 主路径)
+
+AHL 比较的是 agent runtime 中**实际生效**的 harness,不是 workspace 静态文件。
+用 `connect.md` 接已运行 agent 时,AHL 无法自动 snapshot agent 内部状态;
+可能需要 evidence 文件支撑 reproducibility (尤其 cloud agent)。
+
+谁负责创建:
+
+- **Co-pilot 模式**: coding agent 通过对话判断 2×2 情况,向用户追问
+  (路径 / 导出 / plugin list / deployment id / session id 等),按需创建。
+- **Manual 模式**: 你自己据 2×2 判断 (详见 docs/product-walkthrough.md Step 3)。
+
+按需创建 (不默认存在,放在 materials/ 下):
+
+- `runtime-evidence.md` — agent runtime 的 active state
+                          (deployment id / plugin list / config snapshot)
+- `harness-evidence.md` — harness 在 runtime 中实际生效的证据
+                          (路径 / 文件内容 / debug output)
+- `cloud-evidence.md`  — cloud deployment 的可复现快照
+                          (console export / session id / active config)
+
+何时需要:
+
+- 用 `runtime-sources.md` (local_path / git_repo) 时通常**不需要**——
+  AHL 自动 materialize + snapshot。
+- 用 `connect.md` 时通常**需要**,尤其 cloud agent。
+
+> 这是产品约定,AHL 当前**不强制校验** evidence 存在或完整性。
+> Auto 模式 (future) 才会强制判断 evidence level + 标记 weak。
 """
 

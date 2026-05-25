@@ -62,29 +62,50 @@ decision ← evidence ← score/compare ← run
 
 ---
 
-## Step 3 — Declare runtime
+## Step 3 — Declare runtime boundary and evidence level
 
-**这一步回答**:AHL 在哪里跑你的 agent?
+**这一步回答**:agent 在哪?harness 在哪?AHL 能看到多少?
+看不到时补什么 evidence?本轮证据强度是什么?
 
-**改哪里**:据你选的 runtime 创建对应文件——
+> AHL 真正比较的不是 workspace 静态文件,而是 agent runtime 中**实际生效**
+> 的 harness。如果 AHL 无法证明 variant 已经在 runtime 中生效,这轮实验
+> 只是 weak evidence,不能描述成 fully reproducible。
 
-- 本地源码 → `runtime-sources.md`,声明 `type: local_path` + `path`
-- Git repo → `runtime-sources.md`,声明 `type: git_repo` + `url` + `ref`
-- 已运行的 agent(legacy) → `connect.md`,声明类型 + 配置
+### 2×2 矩阵
 
-**产出**:一份描述「agent 在哪里、怎么找到它」的声明文件。
+|                 | **Harness in workspace** | **Harness already installed** |
+|---|---|---|
+| **Local agent** | ① **strong**             | ② **strong** / weak           |
+| **Cloud agent** | ③ **weak**               | ④ **weak**                    |
 
-具体格式见 [`docs/file-formats.md`](file-formats.md)(legacy `connect.md` 四种类型 + runtime sources schema)。
-runtime materialization 的设计动机和细节见 [`docs/runtime-materialization.md`](runtime-materialization.md)。
+**条件说明**:
+- **① Local + Local** 通常是 strongest:AHL 可读、可装、可 snapshot。用 `runtime-sources.md`。
+- **② Local + Already installed** 看路径可读性:用户提供 harness 在本地 agent workspace 中的位置(plugin / memory.md / soul.md / skill 目录等)且路径可读 → strong;只能口头说明 → weak。
+- **③ ④ Cloud 场景默认 weak**:除非用户提供 deployment evidence(deployment id / active config / plugin list / console export / session id 等),才可能升 medium。
 
-**怎么选**:
-- 想验证 prompt / 配置 / patch 改动是否真的进了 runtime → `local_path` 或 `git_repo`
-- 只想测一个已部署 agent 的对话效果 → `connect.md` (legacy)
-- 想跨 commit 跑回归实验 → `git_repo`
+### Evidence collection 跟 setup mode 对齐
 
-**常见误区**:
-- 把所有 agent 都装进 legacy `connect.md` 模式——这样 patch / snapshot / 可复现性都拿不到。
-- `git_repo` 模式下 `ref` 写成分支名(会随时间漂移)。生产实验请固定 commit SHA。
+evidence 文件**不默认创建**,按 setup mode 谁负责追问:
+
+- **Co-pilot (主路径)**: coding agent 通过对话判断 2×2 情况,向用户追问,按需在 materials/ 下整理 `runtime-evidence.md` / `harness-evidence.md` / `cloud-evidence.md`。
+- **Manual**: 用户自己据 2×2 判断;需要时手动创建。
+- **Auto (future)**: 必须自动判断 evidence level;不足时请求用户补;用户不补则继续跑但**必须标记 weak**,不能假装 reproducible。
+
+### connect.md 和 runtime-sources.md 怎么选
+
+| 你的情况 | 用什么 | 也许需要补 |
+|---|---|---|
+| 本地源码可 patch | `runtime-sources.md` (local_path) | 通常不需要 |
+| Git repo 可 clone+checkout | `runtime-sources.md` (git_repo) | 通常不需要 |
+| 已运行的 agent(本地或云端) | `connect.md` (legacy) | **常需 materials/*-evidence.md** |
+
+具体文件格式见 [`docs/file-formats.md`](file-formats.md)。
+
+### 常见误区
+
+- 把所有 agent 装进 legacy `connect.md` 但不补 evidence → 实验只是黑盒行为测试,evidence 是 weak。
+- `git_repo` 模式 `ref` 写分支名(随时间漂移) → 生产实验固定 commit SHA。
+- 假定 cloud agent 一定加载本地 harness → 必须提供云端 active state evidence。
 
 ---
 

@@ -55,9 +55,10 @@ ahl init                     # 生成 goal.md + experiments/
 ahl walkthrough              # 9 步:goal → mode → runtime → ... → decide
                              # 完整文档:docs/product-walkthrough.md
 
-# 4. 声明 runtime —— 三选一:
-#    已运行的 agent          → 创建 connect.md (legacy)
-#    本地源码 / Git repo     → 创建 runtime-sources.md
+# 4. 声明 runtime boundary —— 三选一:
+#    已运行的 agent          → 创建 connect.md (legacy;可能需要补 materials/*-evidence.md)
+#    本地源码 / Git repo     → 创建 runtime-sources.md (自动 snapshot,strong evidence)
+#    (完整 2×2 + evidence level:docs/product-walkthrough.md Step 3)
 
 # 5. 新建实验 (setup mode: copilot 默认 / manual / auto)
 ahl new my-experiment                      # 默认 --mode copilot

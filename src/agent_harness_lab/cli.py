@@ -65,9 +65,12 @@ def cmd_init(args: argparse.Namespace) -> int:
     print("          manual:你手动编辑完整骨架")
     print("          auto:未来模式,当前 not implemented")
     print()
-    print("  Step 3  声明 runtime")
+    print("  Step 3  声明 runtime boundary (agent 在哪 + harness 在哪)")
+    print("          本地源码 / Git repo → runtime-sources.md "
+          "(通常 strong evidence)")
     print("          已运行的 agent → connect.md")
-    print("          本地源码 / Git repo → runtime-sources.md")
+    print("                          可能需要补 materials/*-evidence.md "
+          "(尤其 cloud agent)")
     print()
     print("查看完整流程:")
     print("  ahl walkthrough")
@@ -91,6 +94,11 @@ def cmd_connect(args: argparse.Namespace) -> int:
               "(格式见 docs/file-formats.md)", file=sys.stderr)
         print("- 要从本地源码或 Git repo 跑实验:创建 runtime-sources.md",
               file=sys.stderr)
+        print("", file=sys.stderr)
+        print("用 connect.md 时 AHL 看不到 agent 内部状态,可能需要补 evidence;",
+              file=sys.stderr)
+        print("详见 docs/product-walkthrough.md Step 3 "
+              "(2×2 矩阵 + evidence level)。", file=sys.stderr)
         return 1
     c = parse_connect(path)
     print(f"接入配置:{path}")

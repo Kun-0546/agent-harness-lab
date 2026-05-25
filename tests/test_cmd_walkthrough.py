@@ -108,6 +108,49 @@ class TestWalkthroughOutput(unittest.TestCase):
         self.assertTrue("materials" in ctx.lower(),
                         f"Co-pilot 描述应提 materials/;实际:{ctx!r}")
 
+    def test_step_3_mentions_runtime_boundary_and_evidence(self):
+        """v0.3.1 Step 3:walkthrough Step 3 必须含 boundary + evidence 评级。
+        不再只是 'Declare runtime',而是 'Declare runtime boundary and
+        evidence level',并标 strong/medium/weak。"""
+        step_3_idx = self.stdout.find("Step 3")
+        step_4_idx = self.stdout.find("Step 4")
+        self.assertGreater(step_3_idx, -1)
+        self.assertGreater(step_4_idx, step_3_idx)
+        step_3_seg = self.stdout[step_3_idx:step_4_idx]
+        # 含 boundary 概念
+        self.assertIn("boundary", step_3_seg.lower(),
+                      f"Step 3 应含 'boundary' 概念;实际:{step_3_seg!r}")
+        # 含 evidence 强度评级 (任一关键词)
+        self.assertTrue(
+            any(kw in step_3_seg.lower()
+                for kw in ("evidence", "strong", "weak")),
+            f"Step 3 应含 evidence/strong/weak 评级概念;"
+            f"实际:{step_3_seg!r}")
+
+    def test_step_3_mentions_2x2_matrix_concept(self):
+        """v0.3.1 Step 3:walkthrough Step 3 应反映 agent location × harness
+        location 2×2 矩阵心智 (至少出现 Local 或 Cloud 维度,或 2×2 字眼)。"""
+        step_3_idx = self.stdout.find("Step 3")
+        step_4_idx = self.stdout.find("Step 4")
+        step_3_seg = self.stdout[step_3_idx:step_4_idx]
+        self.assertTrue(
+            "2×2" in step_3_seg or "Local" in step_3_seg
+            or "Cloud" in step_3_seg,
+            f"Step 3 应反映 2×2 矩阵心智 (local/cloud 维度或 2×2 字眼);"
+            f"实际:{step_3_seg!r}")
+
+    def test_step_3_mentions_evidence_files_or_materials(self):
+        """v0.3.1 Step 3:walkthrough Step 3 应让用户知道 evidence 文件
+        在 materials/ 下整理 (按需,Co-pilot 主路径)。"""
+        step_3_idx = self.stdout.find("Step 3")
+        step_4_idx = self.stdout.find("Step 4")
+        step_3_seg = self.stdout[step_3_idx:step_4_idx]
+        # 应提到 materials/ 作为 evidence 位置
+        self.assertIn(
+            "materials", step_3_seg.lower(),
+            f"Step 3 应提及 materials/ 作为 evidence 位置;"
+            f"实际:{step_3_seg!r}")
+
 
 class TestWalkthroughDocExistence(unittest.TestCase):
     """red-line:CLI 引用的 docs/product-walkthrough.md 必须真实存在,

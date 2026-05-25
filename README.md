@@ -55,9 +55,10 @@ ahl init                     # creates goal.md + experiments/
 ahl walkthrough              # 9 steps: goal → mode → runtime → ... → decide
                              # full doc: docs/product-walkthrough.md
 
-# 4. Declare runtime — pick one:
-#    already-running agent     → create connect.md (legacy)
-#    local source / Git repo   → create runtime-sources.md
+# 4. Declare runtime boundary — pick one:
+#    already-running agent     → create connect.md (legacy; may need materials/*-evidence.md)
+#    local source / Git repo   → create runtime-sources.md (auto snapshot, strong evidence)
+#    (full 2×2 + evidence levels: docs/product-walkthrough.md Step 3)
 
 # 5. Create experiment (setup mode: copilot default / manual / auto)
 ahl new my-experiment                      # default: --mode copilot

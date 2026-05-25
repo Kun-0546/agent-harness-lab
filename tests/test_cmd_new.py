@@ -151,6 +151,28 @@ class TestCmdNewCopilot(unittest.TestCase):
         self.assertTrue("约定" in content or "convention" in content.lower(),
                         "materials/README.md 应说明 locked.md 是产品约定")
 
+    def test_materials_readme_mentions_evidence_concept(self):
+        """v0.3.1 Step 3: materials/README.md 应含 Runtime / Harness Evidence
+        节,并提及具体 evidence 文件名 (runtime-evidence / harness-evidence /
+        cloud-evidence 之一)。这是 Co-pilot 主路径下 coding agent 据 2×2
+        判断 evidence 的引导。"""
+        content = (self.exp / "materials" / "README.md").read_text(
+            encoding="utf-8")
+        # 含 evidence 概念
+        self.assertIn("evidence", content.lower(),
+                      "materials/README.md 应含 evidence 概念 (Step 3)")
+        # 含至少一个具体 evidence 文件名
+        self.assertTrue(
+            any(name in content
+                for name in ("runtime-evidence", "harness-evidence",
+                             "cloud-evidence")),
+            "materials/README.md 应提及 runtime-evidence / "
+            "harness-evidence / cloud-evidence 之一作为按需文件")
+        # 应说明 evidence 不默认强制 (产品约定 + Auto future)
+        self.assertTrue(
+            "不强制" in content or "按需" in content,
+            "materials/README.md 应说明 evidence 是按需 / 不强制")
+
     def test_stdout_mentions_setup_mode(self):
         self.assertIn("setup mode=copilot", self.stdout)
 
