@@ -35,7 +35,7 @@
 需要 Python 3.10+。
 
 ```
-git clone <仓库地址>
+git clone https://github.com/Kun-0546/agent-harness-lab.git
 cd agent-harness-lab
 pip install -e .
 ```

@@ -35,7 +35,7 @@ Each experiment is a self-contained folder — its program, harness variants, ca
 Requires Python 3.10+.
 
 ```
-git clone <repo-url>
+git clone https://github.com/Kun-0546/agent-harness-lab.git
 cd agent-harness-lab
 pip install -e .
 ```
