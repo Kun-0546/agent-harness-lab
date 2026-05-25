@@ -590,7 +590,7 @@ def build_parser() -> argparse.ArgumentParser:
     ]
 
     p_review = sub.add_parser("review",
-                               help="读实验里现有文件出 review.md(宽松,缺什么标未起草;V2)")
+                               help="读实验里现有文件出 review.md(宽松,缺什么标未起草)")
     p_review.add_argument("experiment", help="实验编号或名字")
     p_review.set_defaults(func=cmd_review)
 

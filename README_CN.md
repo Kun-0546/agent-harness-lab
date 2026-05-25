@@ -27,7 +27,7 @@
 `ahl` 对外暴露三种模式（setup mode 完整 flow 见 [`docs/product-walkthrough.md`](docs/product-walkthrough.md)）：
 
 - **Manual** —— 你自己设计 harness variants 和实验；`ahl` 校验、运行、评分、比较。**v1，已完成。**
-- **Co-pilot** —— **默认 AI 引导式实验配置模式**:外层 coding agent（Claude Code / Cursor / Codex）通过对话与你协作，维护 `brief.md` 和 `materials/`，并生成或补全实验文件（program / rubric / cases / harnesses）。**v2-minimal，已实现。**
+- **Co-pilot** —— **默认 AI 引导式实验配置模式**:外层 coding agent（Claude Code / Cursor / Codex）通过对话与你协作，维护 `brief.md` 和 `materials/`，并生成或补全实验文件（program / rubric / cases / harnesses）。**已实现。**
 - **Auto** —— Agent 在规则、预算、审核门槛下自动迭代 harness；异常时喊你。**未来模式。** Runtime Materialization M1 已在 v0.3.0 落地（`local_path` + `git_repo`；见 [`docs/runtime-materialization.md`](docs/runtime-materialization.md) 和 [`docs/runtime-materialization-m1-spec.md`](docs/runtime-materialization-m1-spec.md)）；Auto 模式本身仍依赖 calibration + approval gates（M2+）。
 
 ## 安装
