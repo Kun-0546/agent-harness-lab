@@ -59,10 +59,11 @@ def cmd_init(args: argparse.Namespace) -> int:
     print("  Step 1  编辑 goal.md")
     print("          先说清楚:你想改善这个 agent 的什么行为?")
     print()
-    print("  Step 2  选择工作模式")
-    print("          Manual:你自己设计实验")
-    print("          Co-pilot:coding agent 帮你起草,你审核")
-    print("          Auto:未来模式")
+    print("  Step 2  选择 setup mode (只影响 ahl new 建什么结构)")
+    print("          copilot (默认):coding agent 引导式配置实验,")
+    print("                         维护 brief.md / materials/")
+    print("          manual:你手动编辑完整骨架")
+    print("          auto:未来模式,当前 not implemented")
     print()
     print("  Step 3  声明 runtime")
     print("          已运行的 agent → connect.md")
@@ -108,26 +109,76 @@ def cmd_connect(args: argparse.Namespace) -> int:
 
 
 def cmd_new(args: argparse.Namespace) -> int:
+    """新建实验。
+
+    --mode 是 experiment setup mode:只决定 ahl new 建什么结构,
+    不影响 run / score / compare;不写元数据到实验目录。
+    """
+    setup_mode = args.mode  # copilot / manual / auto
+
+    if setup_mode == "auto":
+        print("Auto mode 暂未实现执行能力 (M2+),还在产品设计阶段。",
+              file=sys.stderr)
+        print("当前可用 setup mode:", file=sys.stderr)
+        print("  - copilot (默认) —— AI 引导式实验配置", file=sys.stderr)
+        print("  - manual         —— 你手动编辑完整骨架", file=sys.stderr)
+        print("", file=sys.stderr)
+        print("Auto 完整设计:docs/product-walkthrough.md Step 2 + Step 9",
+              file=sys.stderr)
+        return 2
+
     exp_name = f"{_next_number()}-{args.name}"
     exp_dir = _experiments_dir() / exp_name
     if exp_dir.exists():
         print(f"实验目录已存在:{exp_dir}", file=sys.stderr)
         return 1
     exp_dir.mkdir(parents=True)
-    (exp_dir / "program.md").write_text(
-        templates.PROGRAM_TEMPLATE.replace("{name}", exp_name), encoding="utf-8")
-    (exp_dir / "rubric.md").write_text(templates.RUBRIC_TEMPLATE, encoding="utf-8")
-    (exp_dir / "simulator.md").write_text(templates.SIMULATOR_TEMPLATE, encoding="utf-8")
+
+    if setup_mode == "manual":
+        (exp_dir / "program.md").write_text(
+            templates.PROGRAM_TEMPLATE.replace("{name}", exp_name),
+            encoding="utf-8")
+        (exp_dir / "rubric.md").write_text(templates.RUBRIC_TEMPLATE,
+                                            encoding="utf-8")
+        (exp_dir / "simulator.md").write_text(templates.SIMULATOR_TEMPLATE,
+                                               encoding="utf-8")
+        (exp_dir / "cases").mkdir()
+        (exp_dir / "harnesses").mkdir()
+        print(f"建好实验:{exp_name}  (setup mode=manual)")
+        print(f"  {exp_dir}")
+        print("    program.md     —— 实验指令(假设 + 声明)")
+        print("    rubric.md      —— 评分维度 + 权重")
+        print("    simulator.md   —— 模拟模式下扮用户的 agent")
+        print("    cases/         —— 放 case 文件")
+        print("    harnesses/     —— 放被测的 harness variant 文件")
+        print("  下一步:填 program.md、rubric.md、simulator.md;"
+              "往 cases/、harnesses/ 加文件。")
+        return 0
+
+    # copilot (default)
+    (exp_dir / "brief.md").write_text(templates.BRIEF_TEMPLATE,
+                                       encoding="utf-8")
+    materials_dir = exp_dir / "materials"
+    materials_dir.mkdir()
+    (materials_dir / "README.md").write_text(
+        templates.MATERIALS_README_TEMPLATE, encoding="utf-8")
     (exp_dir / "cases").mkdir()
     (exp_dir / "harnesses").mkdir()
-    print(f"建好实验:{exp_name}")
+    print(f"建好实验:{exp_name}  (setup mode=copilot)")
     print(f"  {exp_dir}")
-    print("    program.md     —— 实验指令(假设 + 声明)")
-    print("    rubric.md      —— 评分维度 + 权重")
-    print("    simulator.md   —— 模拟模式下扮用户的 agent")
-    print("    cases/         —— 放 case 文件")
-    print("    harnesses/     —— 放被测的 harness variant 文件")
-    print("  下一步:填 program.md、rubric.md、simulator.md;往 cases/、harnesses/ 加文件。")
+    print("    brief.md             —— 工作单 (跟 coding agent 一起维护)")
+    print("    materials/README.md  —— 协作目录说明")
+    print("    cases/               —— coding agent 起草")
+    print("    harnesses/           —— coding agent 起草")
+    print()
+    print("下一步:")
+    print('  1. (可选) 编辑 brief.md §1 写清"这次想验证什么"')
+    print("  2. 让 coding agent (Claude Code / Cursor / Codex) 协作:")
+    print("     - 据 goal.md + brief.md + materials/ 起草 "
+          "program/rubric/cases/harnesses")
+    print("     - 通过对话帮你完善 brief.md / 整理 materials/")
+    print("     - 锁定不让 AI 改的文件:在 materials/locked.md 里列 (可选)")
+    print(f"  3. 文件准备好后:ahl review {args.name}  → ahl run {args.name}")
     return 0
 
 
@@ -360,45 +411,21 @@ def cmd_compare(args: argparse.Namespace) -> int:
 
 
 def cmd_draft(args: argparse.Namespace) -> int:
-    """V2 入口:为外层 coding agent 开一个 authoring workspace。
+    """ahl draft 已合并到 ahl new --mode copilot。打印迁移提示后退出。
 
-    AHL 不调模型起草实验 —— 那是外层 coding agent(Claude Code / Cursor /
-    Codex)的活,据 brief.md 起草 program / harnesses / cases / rubric /
-    simulator,完了走 ahl run / score / compare。AHL 这里只 scaffold:建实验
-    目录、brief.md 模板、空的 harnesses/ 和 cases/。幂等可重跑。
+    v0.3.1 Step 2 处理:跟 cmd_versions_legacy_redirect 套路一致——
+    不做转发(避免双入口语义),不创建任何实验目录或文件,旧调用拿明确指引。
     """
-    exp_dir = _find_experiment(args.name)
-    if exp_dir is None:
-        exp_name = f"{_next_number()}-{args.name}"
-        exp_dir = _experiments_dir() / exp_name
-        exp_dir.mkdir(parents=True)
-    else:
-        exp_name = exp_dir.name
-    brief_path = exp_dir / "brief.md"
-    new_brief = not brief_path.exists()
-    if new_brief:
-        brief_path.write_text(
-            templates.BRIEF_TEMPLATE.replace("{name}", exp_name), encoding="utf-8")
-    (exp_dir / "cases").mkdir(exist_ok=True)
-    (exp_dir / "harnesses").mkdir(exist_ok=True)
-
-    print(f"实验:{exp_name}")
-    print(f"  {exp_dir}")
-    print(f"    brief.md       —— 人写的实验意图({'已建模板,去填' if new_brief else '已在'})")
-    print(f"    harnesses/     —— 外层 agent 在此放 harness variant 文件")
-    print(f"    cases/         —— 外层 agent 在此放 case 文件")
-    print()
-    if (exp_dir / "program.md").exists():
-        print(f"  program.md 已起草 —— 下一步:ahl review {args.name}")
-    else:
-        print("  下一步:")
-        print(f"    1. 填好 brief.md(human-owned,外层 agent 不要改它)")
-        print(f"    2. 让外层 coding agent(Claude Code / Cursor / Codex)据 brief.md 起草:")
-        print(f"       program.md、harnesses/V*.md、cases/D*.md、rubric.md、simulator.md")
-        print(f"       agent 读 docs/agent-authoring-guide.md;格式以 docs/file-formats.md 为准")
-        print(f"    3. 跑 ahl review {args.name}  —— 出 review.md(可多次跑,缺什么标未起草)")
-        print(f"    4. 通过后:ahl run {args.name}")
-    return 0
+    print("ahl draft 已合并到 ahl new --mode copilot。", file=sys.stderr)
+    print("请改用:", file=sys.stderr)
+    name = getattr(args, "name", None) or "<name>"
+    print(f"  ahl new {name} --mode copilot", file=sys.stderr)
+    print("或省略 --mode (copilot 是默认):", file=sys.stderr)
+    print(f"  ahl new {name}", file=sys.stderr)
+    print("", file=sys.stderr)
+    print("完整 setup mode 说明:ahl walkthrough (Step 2) "
+          "或 docs/product-walkthrough.md", file=sys.stderr)
+    return 1
 
 
 def cmd_review(args: argparse.Namespace) -> int:
@@ -430,7 +457,8 @@ def cmd_review(args: argparse.Namespace) -> int:
     if not (result.missing or result.broken or result.skipped or result.warnings):
         print(f"  齐了 —— 没问题就 ahl run {args.experiment}")
     else:
-        print(f"  让外层 coding agent 据 brief.md + docs/agent-authoring-guide.md "
+        print(f"  让外层 coding agent 据 goal.md + brief.md + materials/ + "
+              f"docs/product-walkthrough.md + docs/file-formats.md "
               f"起草 / 修正,再跑 ahl review {args.experiment}")
     return 0
 
@@ -487,8 +515,17 @@ def build_parser() -> argparse.ArgumentParser:
                                 help="检查 legacy running-agent 接入配置 connect.md")
     p_connect.set_defaults(func=cmd_connect)
 
-    p_new = sub.add_parser("new", help="新建实验,生成 program.md / rubric.md 模板 + cases/ harnesses/")
+    p_new = sub.add_parser("new",
+                            help="新建实验 (setup mode=copilot 默认 / manual / auto)")
     p_new.add_argument("name", help="实验名,会建成 experiments/<编号-名字>/")
+    p_new.add_argument("--mode",
+                        choices=["copilot", "manual", "auto"],
+                        default="copilot",
+                        help="experiment setup mode (只决定建什么结构,"
+                             "不影响 run/score/compare);默认 copilot:"
+                             "AI 引导式配置 (brief.md 工作单 + materials/);"
+                             "manual:手动完整骨架 (program/rubric/simulator);"
+                             "auto:暂未实现 M2+")
     p_new.set_defaults(func=cmd_new)
 
     p_show = sub.add_parser("show", help="读实验的 program.md 并检查")
@@ -542,10 +579,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_compare.add_argument("experiment", help="实验编号或名字")
     p_compare.set_defaults(func=cmd_compare)
 
-    p_draft = sub.add_parser("draft",
-                              help="为外层 coding agent 开一个 authoring workspace(V2):建实验目录 + brief.md")
-    p_draft.add_argument("name", help="实验名;建成 experiments/<编号-名字>/")
+    p_draft = sub.add_parser("draft", help=argparse.SUPPRESS)
+    p_draft.add_argument("name", nargs="?", help=argparse.SUPPRESS)
     p_draft.set_defaults(func=cmd_draft)
+    # argparse 的 help=SUPPRESS 对 subparser 不彻底 —— 仍出现在 choice list。
+    # 手动从 _choices_actions 移除,让 ahl --help 完全不显示 draft
+    # (跟 cmd_versions_legacy_redirect 一致处理)。
+    sub._choices_actions = [
+        a for a in sub._choices_actions if getattr(a, "dest", None) != "draft"
+    ]
 
     p_review = sub.add_parser("review",
                                help="读实验里现有文件出 review.md(宽松,缺什么标未起草;V2)")

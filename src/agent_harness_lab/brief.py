@@ -1,7 +1,9 @@
-"""读一个实验的 brief.md —— 人写的自然语言实验意图(v2)。
+"""读一个实验的 brief.md —— Co-pilot setup 工作单 (v0.3.1 Step 2 重定义)。
 
-brief 是 V2 的入口:人写它,外层 coding agent(Claude Code / Cursor / Codex 等)
-据它起草 program 等执行文件。AHL 自己不调模型起草。格式见 docs/v2-minimal-spec.md §3。
+brief.md 由 coding agent (Claude Code / Cursor / Codex) 通过对话与用户协作
+维护,并据它生成或补全 program / rubric / cases / harnesses 等实验文件。
+用户不必一次填完——只 §1「想优化什么」是 blocking。AHL 自己不调模型起草。
+完整 setup mode flow 见 docs/product-walkthrough.md (Step 2 + Step 4)。
 """
 from __future__ import annotations
 
@@ -14,7 +16,7 @@ from agent_harness_lab.program import COMPARE_MODES
 
 @dataclass
 class Brief:
-    """一份实验 brief —— V2 里人写的意图入口。"""
+    """一份 Co-pilot setup brief —— coding agent 维护的实验工作单。"""
 
     path: Path
     optimize: str = ""        # 想优化什么
@@ -34,17 +36,17 @@ class Brief:
                 and self.compare in COMPARE_MODES else "对基线")
 
     def validate(self) -> list[str]:
-        """返回问题清单;空清单表示没问题。
+        """返回 blocking problems;空清单表示没问题。
 
-        前四段是外层 agent 起草实验的依据,必须填;「怎么比」可空,
-        填了就得是 对基线 / 线性迭代。
+        v0.3.1 Step 2 放宽:brief.md 是 coding agent 工作单,不是用户必须
+        一次填完的表单。只 §1「想优化什么」是 blocking(它决定 coding
+        agent 起草方向);其他段缺失不报,coding agent 据 goal.md 推。
+        「怎么比」填了但非法仍报。
         """
         problems: list[str] = []
-        checks = (("想优化什么", self.optimize), ("验证什么改动", self.change),
-                  ("最在意什么", self.care), ("不能牺牲什么", self.redlines))
-        for label, value in checks:
-            if not mdutil.is_filled(value):
-                problems.append(f"「{label}」没填")
+        if not mdutil.is_filled(self.optimize):
+            problems.append(
+                "「想优化什么」没填 (必填:它决定 coding agent 起草方向)")
         if mdutil.is_filled(self.compare) and self.compare not in COMPARE_MODES:
             problems.append(
                 f"「怎么比」填了「{self.compare}」,识别不了"

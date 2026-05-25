@@ -222,8 +222,9 @@ class TestReviewWarnings(unittest.TestCase):
         (self.exp / "cases").mkdir(parents=True)
         (self.exp / "harnesses").mkdir()
 
-    def test_brief_placeholder_surfaced_as_warnings(self):
-        # brief 仍是模板占位符 —— is_filled 判 False,brief.validate 返回 4 条
+    def test_brief_section_1_placeholder_surfaced_as_warning(self):
+        # v0.3.1 Step 2 M1 放宽: brief.validate 只对 §1「想优化什么」blocking。
+        # brief 仍是模板占位符 —— is_filled 判 False,但只 §1 进 warnings。
         (self.exp / "brief.md").write_text(
             "# brief\n\n## 想优化什么\n<x>\n\n## 验证什么改动\n<y>\n\n"
             "## 最在意什么\n<z>\n\n## 不能牺牲什么\n<w>\n",
@@ -252,14 +253,20 @@ class TestReviewWarnings(unittest.TestCase):
         self.assertEqual(result.missing, [])
         self.assertEqual(result.broken, [])
         self.assertEqual(result.skipped, [])
-        # 但 warnings 应非空 —— brief 的 4 个未填段必须出现
+        # warnings 应含 brief §1 未填(M1 后只 §1 blocking;§2-§4 不再报)
         self.assertTrue(result.warnings,
                          "应该收到 warnings,cli 不该说「齐了」")
         brief_warns = [w for w in result.warnings if "brief.md" in w]
-        self.assertGreaterEqual(
-            len(brief_warns), 4,
-            f"brief 4 段都该报: {brief_warns}",
+        self.assertTrue(
+            any("想优化什么" in w for w in brief_warns),
+            f"brief §1「想优化什么」未填该报: {brief_warns}",
         )
+        # §2-§4 占位符不再 surface 为 warning (M1 放宽)
+        for skipped_section in ("验证什么改动", "最在意什么", "不能牺牲什么"):
+            self.assertFalse(
+                any(skipped_section in w for w in brief_warns),
+                f"§{skipped_section} 缺失不该再报 warning: {brief_warns}",
+            )
 
 
 # ---- Phase 2:legacy 目录/文件检测 ----

@@ -39,21 +39,26 @@ decision ← evidence ← score/compare ← run
 
 ## Step 2 — Choose mode
 
-**这一步回答**:本轮你打算怎么工作?
+**这一步回答**:本轮你打算怎么 *配置* 这个实验?
 
-**改哪里**:不创建文件,只是认知层面的选择。
+**改哪里**:不创建文件——这一步只决定下一步 `ahl new` 怎么调(传 `--mode`)。
 
-**三种模式**:
+> **"mode" 是 experiment setup mode**:它只决定 `ahl new` 创建什么结构,
+> *不*影响 run / score / compare 的运行行为。AHL runtime 不识别 mode,
+> 没有 `.mode` 元数据文件,也没有 program frontmatter 字段。
 
-| 模式 | 谁做主 | 用什么场景 | 状态 |
+**三种 setup mode**:
+
+| Mode | 谁做主 | 用什么场景 | 状态 |
 |---|---|---|---|
-| **Manual** | 你 | 探索阶段、第一次接触 AHL、改动方向还没收敛 | ✅ 可用 |
-| **Co-pilot** | 外层 coding agent | 改动方向清楚、想让 Claude/Cursor/Codex 起草实验文件 | ✅ 可用 (v2-minimal) |
-| **Auto** | AHL + agent | 多轮自动迭代,异常喊你 | 未来模式 (依赖 M2+ calibration + approval gates) |
+| **copilot** (默认) | 你 + coding agent 协作 | AI 引导式实验配置:coding agent 据 goal.md + brief.md (工作单) + materials/ (参考材料) 跟你协作维护实验文件。你可以让 AI 全做、自己手动配一部分、提供本地材料、锁定某些文件不让 AI 改 | ✅ 可用 |
+| **manual** | 你 | 探索阶段、第一次接触 AHL、想完全手动控制 | ✅ 可用 |
+| **auto** | AHL + agent (未来) | 多轮自动迭代,异常喊你 | 未来模式 (M2+ 依赖 calibration + approval gates);`--mode auto` 当前报 not implemented |
 
 **常见误区**:
-- 第一次用就选 Co-pilot,但 goal.md 还没写清——coding agent 没有方向,起草质量不会好。
-- 把 mode 当成 workspace 级设定。其实它是 per-experiment 的,每次实验可以换。
+- 第一次用就选 copilot,但 goal.md 还没写清——coding agent 没有方向,协作质量不会好。
+- 把 setup mode 当成 workspace 级设定或 runtime 行为标记。它是 per-experiment 的,
+  且只影响 `ahl new` 当下建什么结构;之后 run / score / compare 不区分 mode。
 
 ---
 
@@ -87,11 +92,31 @@ runtime materialization 的设计动机和细节见 [`docs/runtime-materializati
 
 **这一步回答**:把这次实验装进 AHL 的目录结构。
 
-**跑哪个命令**:
-- Manual:`ahl new <name>` → 生成 `experiments/<id>-<name>/` 含 `program.md` / `rubric.md` / `harnesses/` / `cases/` / `simulator.md` 模板
-- Co-pilot:`ahl draft <name>` → 生成 `experiments/<id>-<name>/brief.md` 模板,让外层 coding agent 据它起草其他文件
+**统一入口** `ahl new`,通过 `--mode` 选 setup mode:
+
+```
+ahl new <name>                  # 默认 setup mode=copilot
+ahl new <name> --mode copilot   # = 默认
+ahl new <name> --mode manual    # 你手动编辑完整骨架
+ahl new <name> --mode auto      # 暂未实现 (M2+),exit 2,不创建任何文件
+```
+
+**产物按 setup mode 不同**:
+
+- **copilot** (默认):
+  - `brief.md` (工作单) + `materials/README.md` + `cases/` + `harnesses/`
+  - 不创 program/rubric/simulator —— 让 coding agent 据 brief 起草
+  - 下一步:跟 coding agent 协作维护 brief / materials,起草其他文件,跑 `ahl review`
+- **manual**:
+  - `program.md` + `rubric.md` + `simulator.md` + `cases/` + `harnesses/`
+  - 不创 brief / materials —— 你手动填,跑 `ahl run` → `score` → `compare`
+- **auto**:
+  - 当前 exit 2,不创建任何文件。完整设计见 Step 2 + Step 9。
 
 **产出**:一个自包含的 `experiments/<id>-<name>/` 目录。每个实验可单独复制、单独 re-run。
+setup mode 选定建出什么结构后,后续 run / score / compare / review 不区分 mode。
+
+> 旧的 `ahl draft` 命令已合并到 `ahl new --mode copilot`,跑 `ahl draft` 会拿到 redirect 提示。
 
 ---
 

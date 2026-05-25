@@ -24,10 +24,10 @@
 
 ## 三种产品模式
 
-`ahl` 对外暴露三种模式（完整说明见 [`docs/product-modes.md`](docs/product-modes.md)）：
+`ahl` 对外暴露三种模式（setup mode 完整 flow 见 [`docs/product-walkthrough.md`](docs/product-walkthrough.md)）：
 
 - **Manual** —— 你自己设计 harness variants 和实验；`ahl` 校验、运行、评分、比较。**v1，已完成。**
-- **Co-pilot** —— 外层 coding agent（Claude Code / Cursor / Codex）据你的 `brief.md` 起草 variants 和实验包；关键节点你确认。**v2-minimal，已实现。**
+- **Co-pilot** —— **默认 AI 引导式实验配置模式**:外层 coding agent（Claude Code / Cursor / Codex）通过对话与你协作，维护 `brief.md` 和 `materials/`，并生成或补全实验文件（program / rubric / cases / harnesses）。**v2-minimal，已实现。**
 - **Auto** —— Agent 在规则、预算、审核门槛下自动迭代 harness；异常时喊你。**未来模式。** Runtime Materialization M1 已在 v0.3.0 落地（`local_path` + `git_repo`；见 [`docs/runtime-materialization.md`](docs/runtime-materialization.md) 和 [`docs/runtime-materialization-m1-spec.md`](docs/runtime-materialization-m1-spec.md)）；Auto 模式本身仍依赖 calibration + approval gates（M2+）。
 
 ## 安装
@@ -59,9 +59,11 @@ ahl walkthrough              # 9 步:goal → mode → runtime → ... → decid
 #    已运行的 agent          → 创建 connect.md (legacy)
 #    本地源码 / Git repo     → 创建 runtime-sources.md
 
-# 5. 新建实验
-ahl new my-experiment        # 生成 experiments/001-my-experiment/
-# 填 program.md、rubric.md、harnesses/、cases/、simulator.md
+# 5. 新建实验 (setup mode: copilot 默认 / manual / auto)
+ahl new my-experiment                      # 默认 --mode copilot
+                                           #   → brief.md + materials/README.md + cases/ + harnesses/
+#  或:ahl new my-experiment --mode manual # 完整骨架 (program/rubric/simulator),你手动填
+#  或:ahl new my-experiment --mode auto   # 暂未实现 (M2+)
 
 # 6. 运行、评分、对比
 ahl run 001 ; ahl score 001 ; ahl compare 001
@@ -73,7 +75,7 @@ ahl run 001 ; ahl score 001 ; ahl compare 001
 
 ## 命令
 
-`init` · `connect` · `new` · `show` · `cases` · `rubric` · `simulator` · `harnesses` · `run` · `score` · `compare` · `draft` · `review`。细节跑 `ahl --help` 或 `ahl <命令> --help`。
+`init` · `walkthrough` · `connect` · `new` · `show` · `cases` · `rubric` · `simulator` · `harnesses` · `run` · `score` · `compare` · `review`。细节跑 `ahl --help` 或 `ahl <命令> --help`。
 
 ## 状态
 
@@ -84,7 +86,7 @@ ahl run 001 ; ahl score 001 ; ahl compare 001
 - 只实现了"模拟"对话模式；回放和固定模式、Auto mode（含 calibration 和 approval gates）、噪声/trial 处理，都还没做。
 - 还没有打磨成公开的 case study —— 当前把它当成一个被提出的架构。
 
-在 Co-pilot 模式下，`ahl draft` 为**外层 coding agent** 开一个 scaffolded authoring workspace——agent 据 `brief.md` 起草 `program.md` / `harnesses/` / `cases/` / `rubric.md` / `simulator.md`；`ahl` 自己**不调模型**起草。`ahl review` 再出可审的 `review.md`（宽松：缺什么标"未起草"）。实现切片见 [`docs/v2-minimal-spec.md`](docs/v2-minimal-spec.md)，agent 起草指南见 [`docs/agent-authoring-guide.md`](docs/agent-authoring-guide.md)。
+在 Co-pilot 模式下（`ahl new <名字> --mode copilot`，默认），AHL 创建 `brief.md`（给 coding agent 的工作单）+ `materials/README.md`（参考材料协作目录）。**外层 coding agent**（Claude Code / Cursor / Codex）跟你协作——据 `goal.md` + `brief.md` + `materials/` 起草 `program.md` / `harnesses/` / `cases/` / `rubric.md` / `simulator.md`,并通过对话帮你维护 `brief.md` 和整理 `materials/`；`ahl` 自己**不调模型**。`ahl review` 再出可审的 `review.md`（宽松：缺什么标"未起草"）。旧 `ahl draft` 命令已合并到 `ahl new --mode copilot`。setup mode 完整 flow 见 [`docs/product-walkthrough.md`](docs/product-walkthrough.md)。
 
 让每次 run 都可复现到具体的 harness × runtime 组合——Runtime Materialization——**M1 已在 v0.3.0 落地**（`local_path` + `git_repo` + snapshot persistence + `--cleanup-sandboxes`）；见 [`docs/runtime-materialization.md`](docs/runtime-materialization.md) 和 [`docs/runtime-materialization-m1-spec.md`](docs/runtime-materialization-m1-spec.md)。回放/固定模式、Auto、approval gates、calibration 仍是未来工作。
 

@@ -39,7 +39,7 @@ class TestWalkthroughOutput(unittest.TestCase):
                           f"walkthrough 应含 {label}")
         for name in (
             "Define goal",
-            "Choose mode",
+            "Choose setup mode",  # v0.3.1 Step 2: 改名标 setup mode
             "Declare runtime",
             "Create experiment",
             "Design harness variants",
@@ -67,6 +67,46 @@ class TestWalkthroughOutput(unittest.TestCase):
         for runtime in ("local_path", "git_repo", "legacy"):
             self.assertIn(runtime, self.stdout,
                           f"Step 3 应含 runtime 类型:{runtime}")
+
+    def test_does_not_mention_ahl_draft(self):
+        """v0.3.1 Step 2: ahl draft 已合并到 ahl new --mode copilot,
+        walkthrough 不应再出现 ahl draft 命令。"""
+        self.assertNotIn("ahl draft", self.stdout,
+                         "walkthrough 不应再展示 ahl draft (已合并到 ahl new --mode copilot)")
+
+    def test_mentions_setup_mode_flags(self):
+        """v0.3.1 Step 2: walkthrough Step 4 必须展示 --mode flag (非默认值)。
+        copilot 是默认,不必带 --mode;walkthrough 应明示它是默认 (避免读者
+        以为不写 --mode 会报错)。"""
+        # copilot 是默认 —— 应在 walkthrough 标"默认"或 "default"
+        self.assertTrue(
+            "默认" in self.stdout or "default" in self.stdout.lower(),
+            "walkthrough 应说明 copilot 是默认 setup mode")
+        # manual / auto 必须以 --mode flag 形式出现
+        for flag in ("--mode manual", "--mode auto"):
+            self.assertIn(flag, self.stdout,
+                          f"walkthrough Step 4 应含 setup mode flag:{flag}")
+
+    def test_copilot_described_as_guided_setup(self):
+        """v0.3.1 Step 2 Co-pilot 新定义:AI 引导式配置 / 通过对话维护
+        brief.md 和 materials/,不再是被动'起草,你审核'。"""
+        # 找到 Co-pilot 或 copilot 描述段 (大小写不敏感)
+        lower = self.stdout.lower()
+        copilot_idx = lower.find("copilot")
+        self.assertGreater(copilot_idx, -1, "walkthrough 应提到 copilot")
+        # 取 copilot 之后 400 字符作为描述上下文
+        ctx = self.stdout[copilot_idx:copilot_idx + 400]
+        # 应含"引导"或"guided"或"配置"或"协作"或"对话"之一的协作语义
+        self.assertTrue(
+            any(kw in ctx for kw in ("引导", "guided", "协作", "对话")),
+            f"Co-pilot 应描述为引导式 / guided / 协作 / 通过对话;"
+            f"实际描述:{ctx!r}",
+        )
+        # 应提到 brief.md 和 materials/(维护对象)
+        self.assertTrue("brief" in ctx.lower(),
+                        f"Co-pilot 描述应提 brief.md;实际:{ctx!r}")
+        self.assertTrue("materials" in ctx.lower(),
+                        f"Co-pilot 描述应提 materials/;实际:{ctx!r}")
 
 
 class TestWalkthroughDocExistence(unittest.TestCase):

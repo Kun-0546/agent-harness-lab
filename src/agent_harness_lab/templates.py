@@ -105,11 +105,17 @@ WALKTHROUGH_TEXT = """Agent Harness Lab — 9 步标准产品流程
           - Harness 层假设(prompt? workflow? tool? memory? ...)
           - 成功标准 / 红线
 
-  Step 2  Choose mode
-          决定本轮怎么工作:
-          - Manual    你自己设计 harness variants 和实验
-          - Co-pilot  外层 coding agent(Claude/Cursor/Codex)据 brief.md 起草
-          (Auto mode 是未来模式,依赖 calibration + approval gates,M2+)
+  Step 2  Choose setup mode
+          决定本轮 ahl new 怎么配置实验 (setup mode 只影响 ahl new
+          建什么结构,不影响 run/score/compare):
+          - copilot (默认)  AI 引导式实验配置:coding agent
+                            (Claude/Cursor/Codex) 通过对话维护
+                            brief.md / materials/,生成或补全
+                            program/rubric/cases/harnesses
+          - manual          你手动编辑完整骨架
+                            (program/rubric/simulator + cases/ + harnesses/)
+          - auto            未来模式,依赖 calibration + approval gates
+                            (M2+);--mode auto 当前报 not implemented
 
   Step 3  Declare runtime
           告诉 AHL 你的 agent 在哪:
@@ -118,8 +124,13 @@ WALKTHROUGH_TEXT = """Agent Harness Lab — 9 步标准产品流程
           - 已经在跑的 agent(legacy)  → connect.md
 
   Step 4  Create experiment
-          ahl new <name>     Manual:生成 program/rubric/cases/harnesses/simulator 模板
-          ahl draft <name>   Co-pilot:生成 brief.md,交给外层 coding agent 起草
+          ahl new <name>                 默认 setup mode=copilot
+                                         → brief.md (工作单) + materials/README.md
+                                         + cases/ + harnesses/
+          ahl new <name> --mode manual   完整骨架
+                                         (program/rubric/simulator + cases/ + harnesses/)
+          ahl new <name> --mode auto     not implemented (M2+),exit 2,
+                                         不创建任何文件
 
   Step 5  Design harness variants
           experiments/<id>/harnesses/V1.md, V2.md, ... 一个 variant 一份。
@@ -167,25 +178,76 @@ SIMULATOR_TEMPLATE = """# simulator —— 模拟模式下扮用户的那个 age
 <怎么追问:盯没答透的点、适时换角度、什么时候收尾>
 """
 
-BRIEF_TEMPLATE = """# brief — {name}
+BRIEF_TEMPLATE = """# Brief — Co-pilot Experiment Setup
 
-> 人写的实验意图(V2)。填好后让外层 coding agent(Claude Code / Cursor / Codex)
-> 据它起草 program / harnesses / cases / rubric / simulator,完了跑 ahl review。
-> AHL 自己不调模型起草。
+> 这是一份**工作单**,给 coding agent (Claude Code / Cursor / Codex) 用。
+> 你不用一口气填完——coding agent 会通过对话帮你维护这份文档,
+> 并据它起草 program / rubric / cases / harnesses。
+>
+> goal.md 是 workspace 级长期目标;brief.md 是本轮实验的具体意图。
 
 ## 想优化什么
-<这个 agent,你想让它哪方面变好>
+
+<必填。这次想让 agent 在哪个具体行为上变好?这决定 coding agent 起草方向。
+不会写?让 coding agent 据 goal.md §2 提议,你挑一个。>
 
 ## 验证什么改动
-<这次具体要试的那个改动>
+
+<具体改 harness 哪一层 + 改成什么?
+例:把 V1 的 system prompt 加入"先澄清后行动"约束。
+不写也行,coding agent 会据 goal.md §4 推。>
 
 ## 最在意什么
-<判好坏时你最看重的>
+
+<判好坏时你最看重的维度?
+例:澄清能力 > 方案质量 > 约束遵守。
+不写也行,coding agent 会据 goal.md §5 推。>
 
 ## 不能牺牲什么
-<哪些方面无论如何不能退化 —— 红线>
+
+<本轮哪些维度不能退化?
+默认继承 goal.md §6 红线;有特殊红线在这写。>
 
 ## 怎么比
-<对基线 / 线性迭代;拿不准就留空,默认对基线>
+
+<对基线 / 线性迭代;留空默认对基线。>
+
+## 材料 (可选)
+
+<参考材料放在 materials/ 目录,见 materials/README.md。
+- 提供本地文件路径,让 coding agent 复制进去
+- 粘贴内容,让 coding agent 整理成 materials/<name>.md
+- 锁定不让 coding agent 改的文件:在 materials/locked.md 里列 (产品约定,AHL 不强制)>
+"""
+
+
+MATERIALS_README_TEMPLATE = """# materials/
+
+这个目录给 **coding agent** (Claude Code / Cursor / Codex) 整理本次实验的参考材料。
+
+## 谁写 / 谁读
+
+- **你**:告诉 coding agent 要参考什么(粘贴内容 / 给本地文件路径 / 给链接)
+- **coding agent**:把这些整理成结构化的 markdown 文件,放在这个目录下
+
+## 常见内容 (参考,不强制)
+
+- `prompts-baseline.md`        —— 当前 baseline 的 prompts / config snapshot
+- `target-behavior-examples.md` —— 真实失败 / 不满意例子
+- `domain-knowledge.md`        —— agent 需要懂的领域背景
+- `api-docs.md`                —— 相关 API / 接口的关键说明
+- `references.md`              —— 外部参考链接和摘要
+
+## 锁定不让 AI 改的文件
+
+把不希望 coding agent 修改的文件名列在 `materials/locked.md`,一行一个:
+
+```
+prompts-baseline.md
+api-docs.md
+```
+
+> 这是一份**产品约定**,coding agent 应按 `locked.md` 自律。
+> AHL 当前**不做强制锁定** (写保护 / git hook / patch validation),留 M2+。
 """
 

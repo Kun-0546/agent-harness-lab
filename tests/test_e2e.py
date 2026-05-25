@@ -211,9 +211,11 @@ class TestExternalAgentAuthoring(unittest.TestCase):
         self.addCleanup(os.chdir, original)
         exp = self.root / "experiments" / "001-demo"
         with contextlib.redirect_stdout(io.StringIO()):
-            # 1. ahl draft —— 只 scaffold,不调模型
-            self.assertEqual(cli.main(["draft", "demo"]), 0)
+            # 1. ahl new --mode copilot —— 只 scaffold,不调模型
+            # (v0.3.1 Step 2: 旧 ahl draft 已合并到 ahl new --mode copilot)
+            self.assertEqual(cli.main(["new", "demo", "--mode", "copilot"]), 0)
             self.assertTrue((exp / "brief.md").exists())
+            self.assertTrue((exp / "materials" / "README.md").exists())
             # scaffold-only:program 等等都没起草
             self.assertFalse((exp / "program.md").exists())
 

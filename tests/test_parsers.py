@@ -201,10 +201,22 @@ class TestBrief(_MdCase):
     def test_validate_ok(self):
         self.assertEqual(parse_brief(self._md(self.BRIEF)).validate(), [])
 
-    def test_validate_missing_section(self):
-        # 「最在意什么」空着
+    def test_validate_section_1_missing_is_blocking(self):
+        """v0.3.1 Step 2 M1: §1「想优化什么」缺失必须 blocking。"""
+        b = parse_brief(self._md(self.BRIEF.replace("让回答更简洁", "")))
+        problems = b.validate()
+        self.assertTrue(any("想优化什么" in p for p in problems),
+                        f"§1 缺失应报 blocking;实际 problems:{problems}")
+
+    def test_validate_sections_2_to_4_missing_not_blocking(self):
+        """v0.3.1 Step 2 M1 放宽: §2-§4 缺失不再 blocking
+        (brief.md 是 coding agent 工作单,不是用户必须一次填完的表单;
+        缺的段由 coding agent 据 goal.md 推)。"""
+        # §3 「最在意什么」空着 (其他段有内容)
         b = parse_brief(self._md(self.BRIEF.replace("回答密度", "")))
-        self.assertTrue(any("最在意什么" in p for p in b.validate()))
+        problems = b.validate()
+        self.assertFalse(any("最在意什么" in p for p in problems),
+                         f"§3 缺失不应再 blocking;实际 problems:{problems}")
 
     def test_compare_is_optional(self):
         # 「怎么比」可空 —— 不该报问题
