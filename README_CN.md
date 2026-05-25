@@ -45,10 +45,25 @@ pip install -e .
 ## 快速上手
 
 ```
-ahl init                     # 生成 connect.md、goal.md、experiments/
-# 编辑 connect.md —— 告诉工具怎么连到你的 agent
-ahl new my-experiment        # 搭出 experiments/001-my-experiment/
+# 1. 初始化工作目录
+ahl init                     # 生成 goal.md + experiments/
+
+# 2. 定义目标
+# 编辑 goal.md —— 你想改这个 agent 的什么行为?
+
+# 3. 看完整产品流程
+ahl walkthrough              # 9 步:goal → mode → runtime → ... → decide
+                             # 完整文档:docs/product-walkthrough.md
+
+# 4. 声明 runtime —— 三选一:
+#    已运行的 agent          → 创建 connect.md (legacy)
+#    本地源码 / Git repo     → 创建 runtime-sources.md
+
+# 5. 新建实验
+ahl new my-experiment        # 生成 experiments/001-my-experiment/
 # 填 program.md、rubric.md、harnesses/、cases/、simulator.md
+
+# 6. 运行、评分、对比
 ahl run 001 ; ahl score 001 ; ahl compare 001
 ```
 

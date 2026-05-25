@@ -45,10 +45,25 @@ This installs the `ahl` command. If your shell reports `ahl: command not found`,
 ## Quickstart
 
 ```
-ahl init                     # create connect.md, goal.md, experiments/
-# edit connect.md — tell the tool how to reach your agent
-ahl new my-experiment        # scaffold experiments/001-my-experiment/
+# 1. Init workspace
+ahl init                     # creates goal.md + experiments/
+
+# 2. Define goal
+# edit goal.md — what behavior do you want to improve?
+
+# 3. See the product flow
+ahl walkthrough              # 9 steps: goal → mode → runtime → ... → decide
+                             # full doc: docs/product-walkthrough.md
+
+# 4. Declare runtime — pick one:
+#    already-running agent     → create connect.md (legacy)
+#    local source / Git repo   → create runtime-sources.md
+
+# 5. Create experiment
+ahl new my-experiment        # scaffolds experiments/001-my-experiment/
 # populate: program.md, rubric.md, harnesses/, cases/, simulator.md
+
+# 6. Run, score, compare
 ahl run 001 ; ahl score 001 ; ahl compare 001
 ```
 

@@ -40,35 +40,56 @@ def _next_number() -> str:
 def cmd_init(args: argparse.Namespace) -> int:
     root = Path.cwd()
     created = []
-    for name, content in (("connect.md", templates.CONNECT_TEMPLATE),
-                          ("goal.md", templates.GOAL_TEMPLATE)):
-        p = root / name
-        if p.exists():
-            print(f"已存在,跳过:{name}")
-        else:
-            p.write_text(content, encoding="utf-8")
-            created.append(name)
+    goal = root / "goal.md"
+    if goal.exists():
+        print("已存在,跳过:goal.md")
+    else:
+        goal.write_text(templates.GOAL_TEMPLATE, encoding="utf-8")
+        created.append("goal.md")
     if not _experiments_dir().exists():
         _experiments_dir().mkdir()
         created.append("experiments/")
-    golden = root / "calibration" / "golden"
-    if not golden.exists():
-        golden.mkdir(parents=True)
-        created.append("calibration/golden/")
     print(f"初始化:{root}")
     for c in created:
         print(f"  + {c}")
-    print("  下一步:")
-    print("    1. 填 connect.md、goal.md")
-    print("    2. 开实验:ahl new <名字>(v1 人手写)或 ahl draft <名字>(v2,外层 agent 起草)")
-    print("    3. calibration/golden/ 放 golden case(对话 + 人判定;本期是约定,v2.5 用它校 judge)")
+    print()
+    print("Agent Harness Lab 帮你通过实验改进 agent 的 runtime harness。")
+    print()
+    print("下一步:")
+    print("  Step 1  编辑 goal.md")
+    print("          先说清楚:你想改善这个 agent 的什么行为?")
+    print()
+    print("  Step 2  选择工作模式")
+    print("          Manual:你自己设计实验")
+    print("          Co-pilot:coding agent 帮你起草,你审核")
+    print("          Auto:未来模式")
+    print()
+    print("  Step 3  声明 runtime")
+    print("          已运行的 agent → connect.md")
+    print("          本地源码 / Git repo → runtime-sources.md")
+    print()
+    print("查看完整流程:")
+    print("  ahl walkthrough")
+    print("  docs/product-walkthrough.md")
+    return 0
+
+
+def cmd_walkthrough(args: argparse.Namespace) -> int:
+    """打印 AHL 9 步标准产品流程概览。"""
+    print(templates.WALKTHROUGH_TEXT, end="")
     return 0
 
 
 def cmd_connect(args: argparse.Namespace) -> int:
     path = Path.cwd() / "connect.md"
     if not path.exists():
-        print("当前目录没有 connect.md(先 ahl init)", file=sys.stderr)
+        print("当前目录没有 connect.md。", file=sys.stderr)
+        print("connect.md 是 Step 3 的 legacy running-agent 接入配置,"
+              "不再由 ahl init 默认创建。", file=sys.stderr)
+        print("- 要连一个已经在跑的 agent:手动创建 connect.md"
+              "(格式见 docs/file-formats.md)", file=sys.stderr)
+        print("- 要从本地源码或 Git repo 跑实验:创建 runtime-sources.md",
+              file=sys.stderr)
         return 1
     c = parse_connect(path)
     print(f"接入配置:{path}")
@@ -455,10 +476,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="command", metavar="<command>")
 
-    p_init = sub.add_parser("init", help="初始化工作目录(connect.md + goal.md + experiments/)")
+    p_init = sub.add_parser("init", help="初始化工作目录(goal.md + experiments/)")
     p_init.set_defaults(func=cmd_init)
 
-    p_connect = sub.add_parser("connect", help="读接入配置 connect.md 并检查")
+    p_walkthrough = sub.add_parser("walkthrough",
+                                    help="打印 9 步产品流程概览(Step 1 Define goal → Step 9 Decide)")
+    p_walkthrough.set_defaults(func=cmd_walkthrough)
+
+    p_connect = sub.add_parser("connect",
+                                help="检查 legacy running-agent 接入配置 connect.md")
     p_connect.set_defaults(func=cmd_connect)
 
     p_new = sub.add_parser("new", help="新建实验,生成 program.md / rubric.md 模板 + cases/ harnesses/")

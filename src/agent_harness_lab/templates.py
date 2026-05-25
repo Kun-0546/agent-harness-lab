@@ -42,10 +42,117 @@ CONNECT_TEMPLATE = """# connect —— 工具怎么接到被测 agent
 <外部命令行:跑 agent 的命令(agent 在 WSL 就写 wsl ...);HTTP:端点 URL;进程内库:可 import 的模块>
 """
 
-GOAL_TEMPLATE = """# goal —— 总目标
+GOAL_TEMPLATE = """# Goal — <一句话总目标>
 
-<你想把这个 agent 变成什么样。
-这一层内部怎么写(怎么 engineer),按你的 Goal Engineering 方法 —— 待补。>
+> 这是 workspace 级目标,跨多个实验长期有效。
+> 单次实验的具体迭代意图写在 `experiments/<id>/brief.md`。
+
+> 如果你还说不清楚 §2「想改善的行为」,先补 2-3 个真实例子:
+> agent 现在哪里做得不好?你希望它下次怎么表现?
+> AHL 的实验会围绕这些行为差异来设计。
+
+## 1. 目标 agent
+
+<这个 workspace 优化的是哪个 agent?它的角色、典型用途是什么?>
+
+## 2. 想改善的行为
+
+<具体哪种行为不满意?尽量写成真实 case 类型。
+
+例:
+- 用户给模糊目标时,agent 直接动手写文档,不先澄清。
+- 给出方案时缺少 trade-off 说明。
+- 长对话里忘记前面定过的约束。>
+
+## 3. 当前 baseline
+
+<现在用什么作为对比?
+例:v1 prompt、某个 commit、某个 production version、当前人工流程。>
+
+## 4. Harness 层假设
+
+<你认为优先应该改哪一层 harness?可以多选,并写一句为什么。>
+
+- [ ] system prompt / instruction
+- [ ] workflow / task flow
+- [ ] tool configuration
+- [ ] memory / retrieval
+- [ ] context packaging
+- [ ] output format / schema
+- [ ] guardrails / escalation
+- [ ] other: ______
+
+为什么这些改动可能改善 §2:
+<每个选择写一两句。>
+
+## 5. 成功标准
+
+<这个 workspace 推到什么样算成功?
+可以先写方向,正式评分维度会在 rubric.md 里细化。>
+
+## 6. 不能牺牲的红线
+
+<哪些维度不能退化?
+例:安全、事实性、延迟、成本、用户体验、guardrail 行为。>
+"""
+
+
+WALKTHROUGH_TEXT = """Agent Harness Lab — 9 步标准产品流程
+
+  Step 1  Define goal
+          编辑 goal.md:workspace 级北极星
+          - 目标 agent / 想改善的行为 / baseline
+          - Harness 层假设(prompt? workflow? tool? memory? ...)
+          - 成功标准 / 红线
+
+  Step 2  Choose mode
+          决定本轮怎么工作:
+          - Manual    你自己设计 harness variants 和实验
+          - Co-pilot  外层 coding agent(Claude/Cursor/Codex)据 brief.md 起草
+          (Auto mode 是未来模式,依赖 calibration + approval gates,M2+)
+
+  Step 3  Declare runtime
+          告诉 AHL 你的 agent 在哪:
+          - 本地源码(local_path)     → runtime-sources.md
+          - Git repo(git_repo)        → runtime-sources.md
+          - 已经在跑的 agent(legacy)  → connect.md
+
+  Step 4  Create experiment
+          ahl new <name>     Manual:生成 program/rubric/cases/harnesses/simulator 模板
+          ahl draft <name>   Co-pilot:生成 brief.md,交给外层 coding agent 起草
+
+  Step 5  Design harness variants
+          experiments/<id>/harnesses/V1.md, V2.md, ... 一个 variant 一份。
+          variant 改的是 §4 选定的 harness 层(prompt / workflow / tool / memory ...)。
+          每个 variant 声明 runtime_source + Patch:把哪些改动应用到 runtime。
+
+  Step 6  Prepare cases and rubric
+          cases/       触发 §2 行为差异的具体 case
+          rubric.md    评分维度 + 权重,据 §5 成功标准推导
+          simulator.md 模拟模式下扮用户的 agent 人设
+
+  Step 7  Run experiment
+          ahl run <id>      AHL 为每个 variant materialize 一份隔离 sandbox:
+                              - local_path  copy directory + apply patch
+                              - git_repo    git clone + checkout + apply patch
+                              - legacy      连接到已运行的 agent
+                            然后对每个 case 跑 simulated conversation,记录 transcript。
+                            每条 run 写一份 snapshot:source/commit/patch hash,可复现。
+
+  Step 8  Inspect evidence
+          ahl score <id>     judge 据 rubric 给每段对话打分
+          ahl compare <id>   把 variants 放一起比:总分、每维度 delta、回归点
+          results/snapshots/<run_id>/<variant_id>.json  这次跑的实际版本指纹
+
+  Step 9  Decide next iteration
+          据证据决定:
+          - keep    这版 harness 留下来,作为下一轮 baseline
+          - discard 这版丢掉,回到上一版
+          - next    根据 compare 看到的问题,设计下一轮 variants
+
+完整说明: docs/product-walkthrough.md
+当前模式状态:Manual ✅ Co-pilot v2-minimal ✅ Auto 未来模式
+Runtime Materialization M1:local_path ✅ git_repo ✅ docker M2+ remote M2+
 """
 
 SIMULATOR_TEMPLATE = """# simulator —— 模拟模式下扮用户的那个 agent
