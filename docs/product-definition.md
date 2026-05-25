@@ -1,7 +1,7 @@
 # Agent Harness Lab · 产品定义
 
 > 本文是 Agent Harness Lab 的**顶层主线文档**。如果只读一份，读这份。
-> 这是产品定义，不是实现：抽象与命名以本文为准，实现细节落到 `runtime-materialization.md`（spec）、`file-formats.md`（v1 当前已实现的文件）、`v2-minimal-spec.md`（v2 当前分支的实现切片）。
+> 这是产品定义，不是实现：抽象与命名以本文为准，当前实现细节落到 `product-walkthrough.md`（9 步产品流程）、`file-formats.md`（当前文件格式）、`runtime-materialization.md` + `runtime-materialization-m1-spec.md`（runtime materialization 设计 + M1 实现合同）。`v2-minimal-spec.md` / `agent-authoring-guide.md` / `product-modes.md` 是 v0.2.0 时代历史 spec（见 §10）。
 > 早期设计（`design-v0.3.md` / `design-v0.4.1.md`）保留作为「设计演进史」。HDL / Harness Design Loop 是历史代号，CLI / 包名已对齐到 Agent Harness Lab（见 §11）。
 > 日期：2026-05-21。
 
@@ -136,18 +136,18 @@ Loop 把实验结果反馈进下一版 harness 设计。它回答：
 
 Snapshot 不只是实验记录，也是下一轮开发的起点。
 
-详细 spec 见 `runtime-materialization.md`（设计阶段，未实现）。
+详细 spec 见 `runtime-materialization.md`；v0.3.0 M1 已实现 `local_path` / `git_repo` materialization 和 runtime snapshot，后续 runtime source 类型仍在演进。
 
 ---
 
 ## 4. 三种产品模式
 
-产品层只暴露三种模式，底层复杂度（matrix、authority、provenance）下沉。三种模式的详细心智、流程、当前状态见 `product-modes.md`。
+产品层只暴露三种 setup mode，底层复杂度（matrix、authority、provenance）下沉。当前用户路径见 `product-walkthrough.md` Step 2；`product-modes.md` 仅保留为 historical / authority matrix 背景。
 
 | 模式 | 用户心智 | 当前状态 |
 |---|---|---|
-| **Manual** / 手动 | 我自己设计 harness 和实验，Lab 帮我校验、运行、评分、比较 | v1 已完成 |
-| **Co-pilot** / 人机协作 | Coding agent 帮我起草 harness 方案和实验方案，关键节点我确认 | v2-minimal 分支 |
+| **Manual** / 手动 | 我自己设计 harness 和实验，Lab 帮我校验、运行、评分、比较 | 已完成（`ahl new --mode manual`） |
+| **Co-pilot** / 人机协作 | Coding agent 帮我起草 harness 方案和实验方案，关键节点我确认 | 已完成（`ahl new --mode copilot`，默认） |
 | **Auto** / 自动改进 | Coding agent 在规则、预算、审核门槛下自动迭代 harness；异常喊我 | 未来模式，依赖 materialization 成熟 |
 
 ---
@@ -162,7 +162,7 @@ Run mode 定义实验过程中「用户侧输入」如何产生。它属于 Expe
 | **Replay Run** | 用历史真实用户消息序列，把 user turns 固定喂给不同 variants | 历史日志回归、真实数据重跑 | 用户后续问题不会随不同 agent 回答变化 |
 | **Simulated Conversation Run** | 从 opening input 起，agent 答完，User Simulator 据当前 transcript 生成下一句 | 多轮对话、澄清能力、情绪处理 | Simulator 引入噪声和成本 |
 
-当前 v1 / v2-minimal 只实现 simulated 模式。Replay / direct 留到后续。
+当前实现只覆盖 simulated 模式。Replay / direct 留到后续。
 
 ---
 
@@ -218,7 +218,7 @@ Run mode 定义实验过程中「用户侧输入」如何产生。它属于 Expe
 > `runtime-materialization-m1-spec.md`,文件格式见 `file-formats.md` §Runtime
 > Materialization,总设计 spec 见 `runtime-materialization.md`。
 
-v2-minimal 已经解决 authoring + review + run/score/compare。Runtime Materialization
+v0.2.0 已经解决 authoring + review + run/score/compare。Runtime Materialization
 是 v0.3.0 之后持续推进的核心底层能力:
 
 > **Harness Runtime Materialization & Snapshotting**
@@ -265,24 +265,29 @@ v2-minimal 已经解决 authoring + review + run/score/compare。Runtime Materia
 
 ## 10. 跟旧文档的关系
 
-| 旧文档 | 还有效吗 | 关系 |
+| 文档 | 当前角色 | 关系 |
 |---|---|---|
-| `design-v0.3.md` | 部分有效 | v1 架构（三层模型、四种接入、run / score / compare）仍是当前实现 |
-| `design-v0.4.1.md` | 部分有效 | authority matrix（§3）、escalation（§5）、calibration（§6）、provenance schema（§7）、路线图（§9）仍是长期方向有效输入；§4 / §8 里的 "Designer Agent" 已被 external coding agent 取代（见该文件顶部 notice） |
-| `v2-minimal-spec.md` | 概念 + 命名已同步 | 概念层（external coding agent is the Designer / Lab is protocol）以本文为准；命名已对齐到 Agent Harness Lab（`ahl` CLI、`AHL_*`、`agent_harness_lab` 包、`harnesses/` / `cases/` / `simulator.md`） |
-| `agent-authoring-guide.md` | 概念 + 命名已同步 | 给外层 coding agent 读的起草指南；命名已对齐到 Agent Harness Lab |
-| `file-formats.md` | 描述 v1/v2-minimal 实际行为 | 工具实际读写的文件格式；Phase 2 改名后这份文件随之更新 |
+| `product-walkthrough.md` | **current main** | 9 步标准产品流程。**首次接触 / 当前 coding agent 主指南。** |
+| `file-formats.md` | current | 工具当前实际读写的文件格式;v0.3.0 加了 Runtime Materialization 节 |
+| `runtime-materialization.md` / `runtime-materialization-m1-spec.md` | current | Runtime Materialization 设计 spec + v0.3.0 M1 实现合同 |
+| `product-modes.md` | **historical / deprecated** | v0.2.0 时代的产品模式描述。当前用户路径由 `product-walkthrough.md` Step 2 setup mode + Step 3 runtime boundary 取代;§3 authority matrix 仍作 long-term architecture background |
+| `v2-minimal-spec.md` | **historical / deprecated** | v0.2.0 / v2-minimal 时代实现切片。**已不是当前实现指南**——当前入口是 `ahl new --mode copilot/manual`,不是 `ahl draft`。当前实现见 `product-walkthrough.md` + `src/` |
+| `agent-authoring-guide.md` | **historical / deprecated** | v2-minimal 时代给 coding agent 的指南。**已不是当前 coding agent 主指南**——当前 coding agent 应读 `product-walkthrough.md` + `file-formats.md` + 用户实验的 `materials/README.md` |
+| `design-v0.3.md` | historical | v1 / HDL 时代的架构方案。三层模型(harness / experiment / loop)仍是本文 §2 的底,但当前 workflow / naming 见 `product-walkthrough.md` |
+| `design-v0.4.1.md` | historical (部分有效) | v2+ 长期方向。authority matrix(§3)、escalation(§5)、calibration(§6)、provenance schema(§7)、路线图(§9)仍是长期方向有效输入;§4 / §8 的 "Designer Agent" 已被 external coding agent 取代 |
 | `archive/` 下的 v0.1 / v0.2 / v0.4 / handoff | 历史 | 已被取代的早期草稿 |
+| `handoffs/release-v0.2.0-summary.md` | 历史 release 备忘 | v0.2.0 release 的 phase 1-4 handoff 备忘 |
 
 读哪个：
 
-- 想了解产品定位和概念架构 → 本文
-- 想知道当前工具实际读写什么 → `file-formats.md`
-- 想知道 v1 怎么实现的 → `design-v0.3.md`
-- 想知道长期产品方向 → `design-v0.4.1.md`
-- 想知道当前 v2 分支怎么实现 → `v2-minimal-spec.md`
-- 给外层 coding agent 读 → `agent-authoring-guide.md`
-- 想知道 materialization 怎么落地 → `runtime-materialization.md`（spec）
+- **首次接触产品 / 跟着 CLI 走一遍** → `product-walkthrough.md`
+- **想了解产品定位和概念架构** → 本文
+- **想知道当前工具实际读写什么** → `file-formats.md`
+- **当前 coding agent 主指南** → `product-walkthrough.md` + `file-formats.md` + 用户实验的 `materials/README.md`
+- **想知道 materialization 怎么落地** → `runtime-materialization.md`(spec) + `runtime-materialization-m1-spec.md`(M1 实现合同)
+- 想知道 v1 怎么实现的(历史) → `design-v0.3.md`
+- 想知道长期产品方向(历史) → `design-v0.4.1.md`
+- v0.2.0 / v2-minimal 时代 spec(历史 deprecated) → `v2-minimal-spec.md` / `agent-authoring-guide.md` / `product-modes.md`
 
 ---
 

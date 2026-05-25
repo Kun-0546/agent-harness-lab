@@ -1,26 +1,38 @@
-# Harness Design Loop · 文件格式
+# Agent Harness Lab · 文件格式
 
-> 本文描述 ahl **v1 当前已实现**的文件格式 —— 工具实际读写的。配合架构文档 `design-v0.3.md` 看。
-> v2-minimal 已实现 brief.md、review.md、calibration/golden/ 的最小格式,见 `v2-minimal-spec.md`(§3 / §6 / §7);authority matrix、per-file provenance、calibration 校验闭环仍未实现,见 `design-v0.4.1.md`。
-> 日期:2026-05-19,随代码更新。各格式都对着 `src/agent_harness_lab/` 的解析代码核过。
+> 本文描述 ahl 当前已实现的文件格式 —— 工具实际读写的。
+> 产品流程心智见 [`product-walkthrough.md`](product-walkthrough.md);
+> 顶层产品定义见 [`product-definition.md`](product-definition.md)。
+> 历史架构 reference: [`design-v0.3.md`](design-v0.3.md) (v1) / [`design-v0.4.1.md`](design-v0.4.1.md) (v2+ 长期方向)。
+> v0.3.0 新增 Runtime Materialization 部分见本文 §Runtime Materialization。
+> 各格式都对着 `src/agent_harness_lab/` 的解析代码核过。
 
 ## 工作目录
 
-`ahl init` 在工作目录根建 connect.md / goal.md / experiments/;`ahl new <名字>` 建一个实验:
+`ahl init` 只建 `goal.md` + `experiments/` (v0.3.1 Step 0/1 后)。`connect.md` /
+`runtime-sources.md` / `materials/*-evidence.md` 均**不默认创建** —— 在 Step 3
+据 runtime boundary 选择按需手动创建(见 [`product-walkthrough.md`](product-walkthrough.md) Step 3)。
 
 ```
 <工作目录>/
-├── goal.md                总目标(内部怎么写 = Goal Engineering 方法,待定)
-├── connect.md             接入配置
-└── experiments/
-    └── <编号-名字>/
-        ├── program.md     实验指令
-        ├── rubric.md      评分维度 + 权重
-        ├── simulator.md   模拟模式下扮用户的 agent
-        ├── cases/         一个 case 一个 .md
-        ├── harnesses/     一个 harness variant 一个 .md
-        └── results/       run / score / compare 的产出
+├── goal.md                  workspace 级长期目标 (ahl init 创建)
+├── experiments/             ahl init 创建
+│   └── <编号-名字>/         ahl new <名字> 创建 (产物按 setup mode 不同,见下)
+│       └── results/         run / score / compare 的产出
+│
+├── connect.md               (可选,Step 3) legacy running-agent runtime 接入配置
+├── runtime-sources.md       (可选,Step 3) local_path / git_repo runtime 声明
+└── calibration/             (可选,v2.5+) golden cases 等校准锚点
 ```
+
+### Setup mode 产物 (`ahl new --mode <mode>`,见 [`product-walkthrough.md`](product-walkthrough.md) Step 4)
+
+- **copilot** (默认): `brief.md` + `materials/README.md` + `cases/` + `harnesses/`
+- **manual**: `program.md` + `rubric.md` + `simulator.md` + `cases/` + `harnesses/`
+- **auto**: 当前 not implemented,不创建任何文件
+
+按需可在 `materials/` 下放 `runtime-evidence.md` / `harness-evidence.md` /
+`cloud-evidence.md`(Step 3 evidence 文件,Co-pilot 主路径,不默认创建)。
 
 ---
 

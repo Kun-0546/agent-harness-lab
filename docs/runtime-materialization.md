@@ -17,7 +17,7 @@
 
 ## 0. 为什么需要 Materialization
 
-当前 v1 / v2-minimal 的接入模型（`connect.md` + `version.connect`）有一个隐含假设：
+当前 legacy 接入模型（`connect.md` + `version.connect`，源自 v0.2.0）有一个隐含假设：
 
 > 被测 agent 是个**已经存在**的运行体——你只要告诉 Lab 怎么连上它（命令 / URL / 模块路径），它就能逐轮喂消息。
 
@@ -342,9 +342,9 @@ Snapshot 字段在不同 source 类型下不全是必填——能记多全记多
 
 ## 6. 与现有代码的过渡
 
-当前 v1 / v2-minimal 的 `connect.md` + `version.connect` 字段不会立刻被废弃。过渡分两档：
+当前 legacy `connect.md` + `version.connect` 字段不会立刻被废弃。过渡分两档：
 
-### 6.1 短期（v2-minimal 稳定阶段）
+### 6.1 短期（v0.3.x materialization 阶段）
 
 - `connect.md` / `version.connect` 继续工作，不变。
 - 新加 `harnesses/V*.md` 的可选字段 `runtime_source` + `## Patch` 段——**不写**时按 v1 解析，**写了**时走 materialization 路径。

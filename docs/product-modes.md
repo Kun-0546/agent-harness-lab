@@ -1,5 +1,18 @@
 # Agent Harness Lab · 三种产品模式
 
+> **⚠ DEPRECATED / HISTORICAL (v0.3.1 起,2026-05-25 统一标注)**
+>
+> 本文是 v0.2.0 时代的产品模式描述。**当前用户路径已被 [`product-walkthrough.md`](product-walkthrough.md) 取代**:
+> - **Step 2 setup mode** (`ahl new --mode copilot/manual/auto`) 代替本文 Manual / Co-pilot / Auto 的流程描述
+> - **Step 3 runtime boundary + evidence level** 覆盖本文未涉及的 cloud / installed agent 情况
+> - 当前 Manual 流程**不再要求 init 时创建 connect.md**(`ahl init` 只建 `goal.md` + `experiments/`)
+> - 当前 Co-pilot 主入口是 `ahl new --mode copilot`,**不是 `ahl draft`**
+> - 当前 `brief.md` 是 coding agent **工作单**(可改),**不再 human-owned**
+>
+> 本文 **§3 authority matrix** 仍作为 **long-term architecture background** 保留,
+> 跟 [`design-v0.4.1.md`](design-v0.4.1.md) §3 一致。其余内容是 v0.2.0 时代的
+> 产品流程草稿,**不再代表当前主路径**。
+
 > 本文细化 `product-definition.md` §4 的三种模式：**Manual / Co-pilot / Auto**——它们是用户面对 Lab 时的三种心智，背后是同一张 authority matrix（见 `design-v0.4.1.md` §3）的三档 preset。
 > 与旧文档的关系：`design-v0.4.1.md` 列了 4 个 preset（Mode 1 Manual / Mode 2 Agent-Drafted / Mode 3 Agent-Operated / Mode 4 Self-Improving）。本文把它们收敛为三种**产品模式**——Co-pilot 对应 Mode 2，Auto 涵盖 Mode 3 与 Mode 4（Self-Improving 是 Auto 的进一步形态，不单列）。
 > 日期：2026-05-21。

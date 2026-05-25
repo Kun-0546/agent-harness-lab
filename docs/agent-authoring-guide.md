@@ -1,5 +1,20 @@
 # Agent Authoring Guide
 
+> **⚠ DEPRECATED (v0.3.1 起,2026-05-25 统一标注)**
+>
+> 本文是 v0.2.0 / v2-minimal 时代的 coding agent 指南,**与 v0.3.1 当前主路径
+> 不一致**。已知冲突:本文把 `brief.md` 描述为 "human-owned, 你不要改",
+> 把 `ahl draft <name>` 列为入口——这两条都跟 v0.3.1 Step 2 后的实际行为冲突。
+>
+> **当前 coding agent 应读**:
+> - [`product-walkthrough.md`](product-walkthrough.md) — 9 步产品流程
+>   (含 Step 2 setup mode = `ahl new --mode copilot` + Step 3 runtime boundary
+>   + evidence level)
+> - [`file-formats.md`](file-formats.md) — 实际文件格式(权威)
+> - 用户实验里的 `materials/README.md` — 协作目录 + evidence 文件按需创建规则
+>
+> 本文保留作 v2-minimal 历史 spec,正文不再代表当前主路径心智。
+
 > 给**外层 coding agent**(Claude Code / Cursor / Codex 等)读的。你正在帮用户 author 一个 AHL 实验。AHL 不会自己想实验 —— 那是你的活。
 
 ## Your role(你的角色)

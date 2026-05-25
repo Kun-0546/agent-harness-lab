@@ -1,15 +1,24 @@
 # Harness Design Loop · v2-minimal 实现 spec
 
-> **⚠ 命名与抽象注（Phase 1.5 加入，2026-05-21）**
+> **⚠ HISTORICAL (v0.3.1 起,2026-05-25 统一标注)**
 >
-> **产品抽象以 `product-definition.md` 为准。**
-> - External coding agent is the Designer.
-> - Agent Harness Lab does **not** call a built-in Designer LLM to draft experiment files.
-> - 本文 §4 / §9 的论断与此一致；旧文档里残留的 "Designer Agent" / "AHL 内置 Designer LLM" 路径不是当前主抽象。
+> 本文是 v0.2.0 / v2-minimal 时代的实现切片,**已不是当前实现指南**:
+> - 当前实验创建入口是 **`ahl new --mode copilot`**(默认)或 `--mode manual`,
+>   **不是**本文 §1 / §2 描述的 `ahl draft`
+> - 当前 `brief.md` 是 **coding agent 工作单**(coding agent 通过对话维护),
+>   **不是**本文 §3 / §4 描述的 "human-owned, 你不要改"
+> - 当前实验额外含 `materials/` 协作目录(本文未涉及)
+> - 当前 coding agent 主指南是 [`product-walkthrough.md`](product-walkthrough.md),
+>   **不是**本文 / `agent-authoring-guide.md`
 >
-> **命名已对齐到 Agent Harness Lab**(Phase 2/3 已完成):CLI `ahl`、环境变量 `AHL_*`、Python 包 `agent_harness_lab`、实验目录 `harnesses/` / `cases/` / `simulator.md`。Python 模块文件 `version.py` / `testset.py` 仍沿用旧名(留作后续重构)。
+> **当前实现指南**:
+> - [`product-walkthrough.md`](product-walkthrough.md) — 9 步产品流程(权威)
+> - [`file-formats.md`](file-formats.md) — 文件格式
+> - `src/agent_harness_lab/` — 代码
 >
-> 本文作为 v2-minimal 的实现切片仍然有效——产品抽象以 `product-definition.md` 为准，v2-minimal 的当前实现契约以本文为准，命名以新主线为准。
+> 本文保留作 v2-minimal 历史 spec,正文不再代表当前主路径。
+> 命名 (CLI `ahl` / 包 `agent_harness_lab` / 实验目录 `harnesses/` 等) 已在
+> Phase 2/3 对齐到新主线;Designer Agent 概念已被 external coding agent 取代。
 
 > v2 第一刀(external-agent authored lab 的最小切片)的**实现级 spec** —— 具体到能照着写代码。
 > 架构依据:`design-v0.4.1.md`。本文把 v0.4.1 §9 的「v2」那一档落成可建的细节,但把「Designer 是 AHL 内置 LLM」这条原始设计**主动改成**「外层 coding agent 是 Designer,AHL 是协议」。

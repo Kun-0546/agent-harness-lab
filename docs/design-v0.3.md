@@ -1,5 +1,19 @@
 # Harness Design Loop · 设计方案 v0.3
 
+> **⚠ HISTORICAL (HDL-era / v1 architecture,v0.3.1 起,2026-05-25 统一标注)**
+>
+> 本文是 v1 / HDL (Harness Design Loop) 时代的架构方案。
+> **HDL 是历史代号,当前项目名是 Agent Harness Lab** (Phase 2/3 已完成命名迁移)。
+>
+> 三层模型(harness / experiment / loop)仍是 [`product-definition.md`](product-definition.md) §2 的底,
+> 但**当前 workflow / naming / CLI 入口**见:
+> - [`product-walkthrough.md`](product-walkthrough.md) — 9 步产品流程
+> - [`product-definition.md`](product-definition.md) — 当前产品定义
+> - [`file-formats.md`](file-formats.md) — 当前文件格式
+>
+> 本文保留作 v1 历史架构 reference,**正文里的 HDL / hdl / 项目名等命名是历史**,
+> 不要按字面理解为当前 CLI / 包名 / 项目名。
+
 > 本文是 hdl **v1 的架构**：抽象、三层模型、两个角色、完整流程。
 > 已实现的文件格式见 `file-formats.md`，CLI 以 README 和 `hdl --help` 为准。
 > v2 及以后的方向见 `design-v0.4.1.md`。
