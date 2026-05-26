@@ -317,6 +317,110 @@ path,该 flag 对它们无效。
 
 ---
 
+## Harness Package (v0.5)
+
+v0.5 加 workspace 根 `harness-packages/` 目录,让 harness payload 可跨实验
+复用。完整契约 [`harness-package-mvp.md`](harness-package-mvp.md)。下面只
+列**文件格式**。
+
+### Directory layout
+
+```
+<workspace>/
+└── harness-packages/
+    └── <package-id>/                # kebab-case, workspace-unique
+        └── <version>/                # SemVer
+            ├── manifest.md
+            └── payload/              # files referenced by ## Payload .source
+                ├── ...
+```
+
+### `manifest.md` 格式
+
+```markdown
+---
+id: minimal-strict-prompt
+version: 0.1.0
+runtime_compatibility: [local_path, git_repo]
+---
+
+## Description
+Free-form 描述。
+
+## Payload
+
+files:
+  - target: prompts/system.md         # 相对 sandbox root
+    source: payload/system.md         # 相对 pkg_dir,必在 payload/ 下
+env:
+  HARNESS_STRICT: "1"
+start_command: python -m agent.run
+```
+
+约束:
+- frontmatter `id` / `version` / `runtime_compatibility` 必填;path 上的
+  `<id>` / `<version>` 必须等于 frontmatter
+- `runtime_compatibility` v0.5 范围 `{local_path, git_repo}`,**不允许**
+  `legacy_connect`;未知 type(如 docker_image)forward-compat 接受
+- `## Description` 段必存(body 可空)
+- `## Payload` 段必存;三子段(files / env / start_command)至少一个非空
+- `payload source` path traversal:必在 `payload/` 下
+
+### `experiments/<id>/harnesses/V*.md` 新增可选 frontmatter
+
+```yaml
+---
+id: V2
+基线: 否
+runtime_source: openmanus-main
+harness_package: minimal-strict-prompt@0.1.0   # NEW v0.5,可选
+---
+```
+
+- 必须 `<id>@<version>` 完整格式,bare id 不接受
+- 必同时设 `runtime_source`(legacy connect 不支持 package install)
+- 配 patch:install 顺序固定 **materialize → package → patch → snapshot**;
+  patch 胜出 (file / env / start_command)
+- 详细规则见 [`harness-package-mvp.md`](harness-package-mvp.md) §9/§10
+
+### `snapshot.harness_package` 块(spec §12)
+
+variant 无 package → `harness_package: null`;有 package:
+
+```json
+{
+  "harness_package": {
+    "id": "minimal-strict-prompt",
+    "version": "0.1.0",
+    "ref": "minimal-strict-prompt@0.1.0",
+    "manifest_path": "harness-packages/minimal-strict-prompt/0.1.0/manifest.md",
+    "manifest_hash": "sha256:...",
+    "payload_hash": "sha256:...",
+    "effective_harness_hash": "sha256:...",
+    "install_order": ["package", "patch"]
+  }
+}
+```
+
+- `manifest_path` 用 forward slash (cross-OS reproducible)
+- `manifest_hash` = raw bytes of manifest.md
+- `payload_hash` = deterministic over sorted [target+file_hash] + env JSON + start_command
+- `effective_harness_hash` = sandbox 中 union(package_targets, patch_targets) 实际文件内容 + merged env + 最终 start_command
+- `install_order` v0.5 固定 `["package", "patch"]`
+
+### v0.4 Evidence 与 package 联动
+
+v0.5 evidence 推断规则在 [`evidence-aware-result.md`](evidence-aware-result.md)
+基础上扩展(spec [`harness-package-mvp.md`](harness-package-mvp.md) §13):
+
+- 无 package → v0.4 规则不变
+- 有 package + base strong + 三 hash 齐 → strong (additive reason)
+- 有 package + base strong + 任一 hash 缺 → 降级 medium
+- 有 package + base medium/weak → 维持 level,additive reason
+- legacy_connect + package → defensive unknown(永不 promote)
+
+---
+
 ## Evidence (v0.4)
 
 v0.4 在 score JSON 加 top-level `evidence` 字段;compare report 加 `## Evidence`

@@ -110,9 +110,21 @@ class GitRepoAdapter:
             raise RuntimeError(
                 f"版本 {version.version_id}:runtime_source 写了但无 patch 段 "
                 f"(M1 patch 必填,含 start_command)")
-        if not version.patch.start_command:
+
+        # v0.5: harness package lookup + start_command resolution
+        from agent_harness_lab.harness_package import (
+            install_package_payload,
+            merge_env,
+            resolve_start_command,
+        )
+        manifest = (ctx.variant_packages or {}).get(version.version_id)
+        patch_start = version.patch.start_command
+        manifest_start = manifest.payload_start_command if manifest else None
+        effective_start = resolve_start_command(patch_start, manifest_start)
+        if not effective_start:
             raise RuntimeError(
-                f"版本 {version.version_id}:patch.start_command 缺 "
+                f"版本 {version.version_id}:必须由 package manifest 或 "
+                f"variant ## Patch 至少一方提供 start_command "
                 f"(M1 不假设默认命令)")
 
         source = _lookup_source(version, ctx)
@@ -140,23 +152,34 @@ class GitRepoAdapter:
         commit_sha = _git_capture(
             git, ["rev-parse", "HEAD"], cwd=sandbox_path).strip()
 
-        # Step 5: source_dir_hash —— checkout 后 patch 之前 (跟 local_path 时机一致)
+        # Step 5: source_dir_hash —— checkout 后 patch / package 之前
+        # (compute_dir_hash 已 ignore .git → git metadata 不算入指纹)
         source_dir_hash = compute_dir_hash(sandbox_path)
 
-        # Step 6: apply patch (覆盖 target;_safe_target_path 防 traversal)
+        # Step 6 (NEW v0.5): install harness package payload —— 在 patch 之前
+        # 顺序固定:materialize → package → patch → snapshot
+        # (spec docs/harness-package-mvp.md §9)
+        if manifest is not None:
+            install_package_payload(manifest, sandbox_path)
+
+        # Step 7: apply patch (覆盖 target;包括覆盖 package 同名文件)
         apply_patch(version.patch, sandbox_path)
+
+        # Merged env (package + patch, patch 胜出 per-key)
+        package_env = manifest.payload_env if manifest else {}
+        merged_env = merge_env(package_env, dict(version.patch.env))
 
         return Sandbox(
             type="git_clone",
             path=sandbox_path,
-            start_command=version.patch.start_command,
+            start_command=effective_start,
             metadata={
                 "source_dir_hash": source_dir_hash,
                 "source_name": source.name,
                 "url": url,
                 "ref": ref,
                 "commit_sha": commit_sha,
-                "env": dict(version.patch.env),
+                "env": merged_env,
             },
         )
 

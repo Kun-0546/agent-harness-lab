@@ -31,6 +31,8 @@ class Version:
     # M1 新增:Runtime Materialization 字段;None = legacy 路径,走 connect.md
     runtime_source: str | None = None       # frontmatter 字段,引用 runtime-sources.md 的 name
     patch: HarnessPatch | None = None       # ## Patch 段;runtime_source 未写时为 None
+    # v0.5 新增:Harness Package MVP frontmatter 字段
+    harness_package: str | None = None      # "<id>@<version>" 引用 harness-packages/
 
     def validate(self) -> list[str]:
         """返回问题清单;空清单表示没问题。"""
@@ -42,7 +44,15 @@ class Version:
         if self.connect is not None:
             problems += [f"接入配置:{p}" for p in self.connect.validate()]
         if self.runtime_source and self.patch is not None:
-            problems += [f"patch:{p}" for p in self.patch.validate()]
+            patch_problems = self.patch.validate()
+            # v0.5:variant 引用 harness_package 时,patch 可省略 start_command
+            # (package manifest 可供给)。其它 patch 问题仍 surface。最终
+            # 双方都缺 start_command 由 workflow.run preflight 抓(此时 Manifest
+            # 已加载,可看 manifest.payload_start_command)。
+            if self.harness_package:
+                patch_problems = [p for p in patch_problems
+                                  if "缺 start_command" not in p]
+            problems += [f"patch:{p}" for p in patch_problems]
         return problems
 
 
@@ -71,6 +81,12 @@ def parse_version(path: str | Path) -> Version:
         # variant 在 experiments/<id>/harnesses/V*.md;experiment_dir = path.parent.parent
         experiment_dir = path.parent.parent
         v.patch = parse_patch(patch_text, experiment_dir)
+    # v0.5:harness_package frontmatter 字段;格式 <id>@<version>。
+    # 这里只 carry 原 string;格式校验 + resolution 由 workflow.run preflight 做
+    # (此时 packages index 已加载,可 cross-validate)。
+    pkg = fields.get("harness_package", "").strip()
+    if pkg:
+        v.harness_package = pkg
     return v
 
 

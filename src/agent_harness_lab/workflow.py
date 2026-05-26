@@ -228,8 +228,12 @@ def run(exp_dir: Path, use_llm: bool,
     # 的 v.validate() → patch.validate() 链路统一抓,不再 workflow 内重复
 
     # Legacy connect fallback 校验:无 runtime_source + 无 variant.connect → 要全局 connect.md
+    # v0.5:variant 有 harness_package 时 skip 这条 (走 package preflight,
+    # 给出 ERR-VARIANT-2 的精确消息;不让 legacy fallback 错误吞掉)
     needs_global = [v.version_id for v in versions
-                    if v.connect is None and v.runtime_source is None]
+                    if v.connect is None
+                    and v.runtime_source is None
+                    and v.harness_package is None]
     if needs_global:
         if connect is None:
             raise WorkflowError(
@@ -241,6 +245,78 @@ def run(exp_dir: Path, use_llm: bool,
             raise WorkflowError(
                 f"这些版本要用全局 connect.md:{'、'.join(needs_global)}\n"
                 "  但 connect.md 有问题:\n  - " + "\n  - ".join(connect_issues))
+
+    # === v0.5: Harness Package preflight ===
+    # spec docs/harness-package-mvp.md §7。规则:
+    # - discover packages from workspace_root/harness-packages/
+    # - variant 引用 harness_package 时:必 <id>@<version> 格式;必有 runtime_source;
+    #   manifest 必存在;runtime_source.type 必在 manifest.runtime_compatibility;
+    #   defensive 拒 legacy_connect;若 variant patch + manifest 都无 start_command 抛错
+    # - 通过的 variant 进 variant_packages dict 传给 MaterializeContext
+    from agent_harness_lab.harness_package import (
+        discover_packages,
+        parse_variant_ref,
+    )
+    try:
+        packages_index = discover_packages(workspace_root)
+    except (ValueError, OSError, UnicodeDecodeError) as e:
+        raise WorkflowError(f"harness-packages/ 解析失败:{e}") from e
+
+    variant_packages: dict[str, object] = {}
+    for v in versions:
+        if v.harness_package is None:
+            continue
+        # ERR-VARIANT-1: bare id or bad format
+        try:
+            pkg_id, pkg_version = parse_variant_ref(v.harness_package)
+        except ValueError as e:
+            raise WorkflowError(
+                f"版本 {v.version_id} harness_package 格式无效:{e}"
+            ) from e
+        # ERR-VARIANT-2: package requires runtime_source
+        if v.runtime_source is None:
+            raise WorkflowError(
+                f"版本 {v.version_id}:harness_package={v.harness_package!r} "
+                f"必须同时指定 runtime_source "
+                f"(legacy connect 不支持 package install)"
+            )
+        # ERR-RESOLV-1: unknown package
+        manifest = packages_index.get((pkg_id, pkg_version))
+        if manifest is None:
+            available = sorted(
+                f"{i}@{ver}" for (i, ver) in packages_index.keys())
+            raise WorkflowError(
+                f"版本 {v.version_id} 引用的 package "
+                f"{v.harness_package!r} 不存在;可用:"
+                f"{', '.join(available) if available else '(空)'}"
+            )
+        # ERR-COMPAT-1: runtime type 不在 manifest 的 compat 列表
+        rs_source = sources_by_name.get(v.runtime_source)
+        if rs_source is None:
+            # defensive: validate_variant_source_refs 已捕
+            raise WorkflowError(
+                f"版本 {v.version_id}:runtime_source "
+                f"{v.runtime_source!r} 不存在"
+            )
+        if rs_source.type not in manifest.runtime_compatibility:
+            raise WorkflowError(
+                f"版本 {v.version_id}:runtime_source.type="
+                f"{rs_source.type!r} 不在 package {manifest.ref} "
+                f"runtime_compatibility={manifest.runtime_compatibility}"
+            )
+        # ERR-COMPAT-2 (defensive): legacy_connect 永不允许 + package
+        if rs_source.type == "legacy_connect":
+            raise WorkflowError(
+                f"版本 {v.version_id}:harness_package 不能配 legacy_connect"
+            )
+        # ERR-START-CMD: 双方都缺 start_command
+        patch_start = v.patch.start_command if v.patch else None
+        if not patch_start and not manifest.payload_start_command:
+            raise WorkflowError(
+                f"版本 {v.version_id}:必须由 package manifest 或 "
+                f"variant ## Patch 至少一方提供 start_command"
+            )
+        variant_packages[v.version_id] = manifest
 
     if use_llm:
         sim_path = exp_dir / "simulator.md"
@@ -271,6 +347,7 @@ def run(exp_dir: Path, use_llm: bool,
         experiment_dir=exp_dir,
         fallback_connect=connect,
         runtime_sources=runtime_sources,
+        variant_packages=variant_packages,
     )
 
     # per variant lifecycle:adapter → materialize → snapshot → ...

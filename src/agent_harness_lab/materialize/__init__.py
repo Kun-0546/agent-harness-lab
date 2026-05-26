@@ -46,6 +46,9 @@ class MaterializeContext:
     experiment_dir: Path
     fallback_connect: Connect | None       # workspace 根的 connect.md;legacy variant 用
     runtime_sources: list[RuntimeSource]   # workspace 根的 runtime-sources.md 解析结果
+    # v0.5: variant_id → Manifest (per-variant harness package, None / 缺 key 表示无 package)
+    # 由 workflow.run preflight 填充;dict 类型避免循环 import (Manifest 在 harness_package.py)
+    variant_packages: dict = field(default_factory=dict)
 
 
 class RuntimeAdapter(Protocol):

@@ -151,7 +151,14 @@ setup mode 选定建出什么结构后,后续 run / score / compare / review 不
 1. 绑定哪个 `runtime_source`(Step 3 声明的某个)
 2. `Patch`——这个 variant 对 runtime 做了什么改动(files / env / start_command)
 
-详细 patch 语法见 [`docs/file-formats.md`](file-formats.md) §Harness Variant + §Runtime Materialization。
+**v0.5 可选**:variant 还可引用 workspace `harness-packages/<id>/<version>/`
+里的 **Harness Package**,在 `## Patch` 之前 install 到 sandbox。frontmatter
+加 `harness_package: <id>@<version>`,workflow 自动 install:
+materialize → package → patch → snapshot。Patch 胜出文件 / env /
+start_command 冲突,实现"package 提供默认,variant patch 局部覆盖"。详见
+[`harness-package-mvp.md`](harness-package-mvp.md)。
+
+详细 patch 语法见 [`docs/file-formats.md`](file-formats.md) §Harness Variant + §Runtime Materialization + §Harness Package (v0.5)。
 
 **常见误区**:
 - variant 改的层不是 goal.md §4 选的层。如果 §4 说「想改 memory 层」但所有 variants 都改 prompt——这次实验没验证假设。

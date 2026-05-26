@@ -60,6 +60,82 @@ def infer_evidence_from_snapshot(snapshot_dict: dict | None,
                                   materials_dir: Path | None) -> dict:
     """Infer evidence level for a single variant from its snapshot dict.
 
+    v0.4 contract preserved: compute base evidence from runtime_source +
+    harness_patch + materials_dir (see _compute_base_evidence). v0.5 extension:
+    if snapshot has a non-null `harness_package` block, apply overlay rules
+    from docs/harness-package-mvp.md §13:
+
+    - package present + base strong + 3 hashes complete → strong (additive reason)
+    - package present + base strong + any hash missing → downgrade to medium
+    - package present + base medium/weak → keep level, additive reason
+    - package present + runtime_source.type = legacy_connect → defensive unknown
+      (preflight should have rejected this; never promote)
+
+    snapshots without `harness_package` field behave identically to v0.4.
+    """
+    base = _compute_base_evidence(snapshot_dict, materials_dir)
+    if snapshot_dict is None:
+        return base
+    harness_package = snapshot_dict.get("harness_package")
+    if not harness_package:
+        return base
+    return _apply_package_overlay(base, harness_package)
+
+
+_WARNING_LEGACY_PLUS_PACKAGE_DEFENSIVE = (
+    "package present on legacy_connect — preflight should have rejected this"
+)
+_REASON_PACKAGE_INCOMPLETE_FINGERPRINT = (
+    "materialized runtime but incomplete harness package fingerprint"
+)
+
+
+def _apply_package_overlay(base: dict, harness_package: dict) -> dict:
+    """v0.5 package overlay rules (spec §13)。"""
+    reasons = list(base.get("reasons") or [])
+    rs_type = base.get("runtime_source_type")
+    ref = harness_package.get("ref", "?")
+
+    # Defensive: legacy_connect + package → unknown (never promote)
+    if rs_type == "legacy_connect":
+        return {
+            **base,
+            "level": LEVEL_UNKNOWN,
+            "reasons": reasons + [_WARNING_LEGACY_PLUS_PACKAGE_DEFENSIVE],
+        }
+
+    required_hashes = ("manifest_hash", "payload_hash", "effective_harness_hash")
+    missing = [k for k in required_hashes if not harness_package.get(k)]
+
+    if base["level"] == LEVEL_STRONG and missing:
+        return {
+            **base,
+            "level": LEVEL_MEDIUM,
+            "reasons": reasons + [
+                f"{_REASON_PACKAGE_INCOMPLETE_FINGERPRINT} "
+                f"(missing: {', '.join(missing)})"
+            ],
+        }
+
+    if base["level"] == LEVEL_STRONG:
+        return {
+            **base,
+            "reasons": reasons + [
+                f"harness_package {ref} fully fingerprinted"
+            ],
+        }
+
+    # base medium / weak / unknown: keep level, additive reason
+    return {
+        **base,
+        "reasons": reasons + [f"harness_package {ref} present"],
+    }
+
+
+def _compute_base_evidence(snapshot_dict: dict | None,
+                            materials_dir: Path | None) -> dict:
+    """v0.4 base evidence inference (unchanged contract).
+
     Returns a stable, JSON-serializable dict:
         {"level", "runtime_source_type", "snapshot_id", "snapshot_available",
          "materials_evidence", "reasons"}

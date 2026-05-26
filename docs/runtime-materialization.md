@@ -113,6 +113,11 @@ class RuntimeAdapter:
 
 ## 2. 整体流程
 
+> **v0.5 update**:install order 固定为 **materialize → harness_package
+> → variant patch → snapshot**。harness package(v0.5 新增,见
+> `harness-package-mvp.md`)在 source copy 之后、variant `## Patch` 之前
+> 安装到 sandbox。Variant patch 胜出 file / env / start_command 冲突。
+
 加入 Materialization 后，`ahl run` 的内部流程：
 
 ```

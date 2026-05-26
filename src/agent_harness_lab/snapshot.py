@@ -30,9 +30,11 @@ if TYPE_CHECKING:
 class RuntimeSnapshot:
     """spec §2:一次 (variant) 跑的 snapshot。
 
-    legacy 路径:harness_patch / sandbox 都是 None,runtime_source 是
-    {type: "legacy_connect", connect_md_hash: "sha256:..."}。
+    legacy 路径:harness_patch / sandbox / harness_package 都是 None,
+    runtime_source 是 {type: "legacy_connect", connect_md_hash: "sha256:..."}。
     materialized 路径(C5+):harness_patch / sandbox 填实际值。
+    v0.5+:variant 引用 harness_package 时,harness_package 块为 spec §12.1
+    schema;否则为 None。
     """
 
     snapshot_id: str                       # "legacy" or "snap-<run_id>-<variant_id>"
@@ -44,6 +46,7 @@ class RuntimeSnapshot:
     harness_patch: dict | None             # legacy: None;C5+ filled
     sandbox: dict | None                   # legacy: None;C5+ filled
     environment: dict = field(default_factory=dict)
+    harness_package: dict | None = None    # v0.5 新增;无 package 时 None
 
     def to_json(self) -> dict:
         """转 dict 用于 json.dumps。"""
@@ -107,6 +110,38 @@ def build_snapshot(
         harness_patch_dict = None
         sandbox_dict = None
 
+    # v0.5: harness_package 块(spec §12)。variant 无 package → None。
+    # materialize 失败(sandbox=None)→ None(无法算 effective_harness_hash)。
+    manifest = (getattr(ctx, "variant_packages", None) or {}).get(
+        version.version_id)
+    harness_package_dict: dict | None
+    if (manifest is not None and sandbox is not None
+            and sandbox.path is not None):
+        from agent_harness_lab.harness_package import (
+            build_snapshot_block,
+            compute_effective_harness_hash,
+            compute_payload_hash,
+            merge_env,
+        )
+        package_targets = [f["target"] for f in manifest.payload_files]
+        patch_targets = ([pf.target_path for pf in version.patch.files]
+                         if version.patch is not None else [])
+        merged_env = merge_env(
+            manifest.payload_env,
+            dict(version.patch.env) if version.patch is not None else {},
+        )
+        effective_hash = compute_effective_harness_hash(
+            sandbox.path, package_targets, patch_targets,
+            merged_env, sandbox.start_command or "",
+        )
+        payload_hash = compute_payload_hash(manifest)
+        workspace_root = ctx.experiment_dir.parents[1]
+        harness_package_dict = build_snapshot_block(
+            manifest, workspace_root, payload_hash, effective_hash,
+        )
+    else:
+        harness_package_dict = None
+
     return RuntimeSnapshot(
         snapshot_id=compute_snapshot_id(version, ctx.run_id),
         run_id=ctx.run_id,
@@ -117,6 +152,7 @@ def build_snapshot(
         harness_patch=harness_patch_dict,
         sandbox=sandbox_dict,
         environment=env,
+        harness_package=harness_package_dict,
     )
 
 
