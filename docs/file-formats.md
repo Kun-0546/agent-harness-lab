@@ -33,6 +33,9 @@
 
 按需可在 `materials/` 下放 `runtime-evidence.md` / `harness-evidence.md` /
 `cloud-evidence.md`(Step 3 evidence 文件,Co-pilot 主路径,不默认创建)。
+详细格式见 §Materials Evidence Files;reference templates 在
+[`../examples/evidence-examples/`](../examples/evidence-examples/);用户
+解读指南在 [`evidence-guide.md`](evidence-guide.md)。
 
 ---
 
@@ -508,6 +511,47 @@ v0.5 evidence 推断规则在 [`evidence-aware-result.md`](evidence-aware-result
 - 有 package + base strong + 任一 hash 缺 → 降级 medium
 - 有 package + base medium/weak → 维持 level,additive reason
 - legacy_connect + package → defensive unknown(永不 promote)
+
+---
+
+## Materials Evidence Files (v0.4)
+
+`experiments/<id>/materials/{runtime,harness,cloud}-evidence.md` —
+user-supplied attestation files for **legacy `connect.md`** variants.
+Their existence upgrades the variant from `weak → medium` in v0.4
+evidence inference. **AHL never parses the content** — existence-only
+detection.
+
+```
+materials/
+├── runtime-evidence.md      # 已运行 agent 的 runtime state(进程 / cwd / env)
+├── harness-evidence.md      # 已运行 agent 加载的 harness(prompt / memory / plugins)
+└── cloud-evidence.md        # 云端 deployment 的 attestation(id / config / capture-time state)
+```
+
+约束:
+
+- **Existence-only**: 三个文件名固定(`runtime-evidence.md` /
+  `harness-evidence.md` / `cloud-evidence.md`),其它文件名不会触发升级。
+- **Content 自由格式**: AHL 不解析内容,但建议每份文件都写清「what was
+  checked / who supplied / when captured / what it can support / what it
+  cannot prove / limitations」六段,便于事后审阅。
+- **不默认创建**: `ahl init` / `ahl new` 都不生成 evidence 文件。
+- **`ahl probe --write-evidence` 自动写**: 仅对 legacy_connect variant +
+  status ∈ {ok, warn} 触发,内容含 probe 检查项 + 可选 smoke 输出 +
+  limitations 声明「supplied runtime evidence, not cloud attestation」。
+- **Materialized variant 不需要**: `local_path` / `git_repo` 走 snapshot
+  fingerprint 路径,不消费 evidence 文件;`--write-evidence` 跳过这些
+  variant 并打 stderr warning。
+
+**Reference templates**:
+[`../examples/evidence-examples/`](../examples/evidence-examples/) 提供
+三份带注释的样例(runtime / harness / cloud),复制到自己实验的
+`materials/` 下并按情况改。
+
+**用户层解读**: 哪一档可信、什么时候升、AHL 不证明什么 —— 见
+[`evidence-guide.md`](evidence-guide.md)。**Supplied evidence 永远只能
+到 medium**(不能到 strong);materialized runtime 才能到 strong。
 
 ---
 

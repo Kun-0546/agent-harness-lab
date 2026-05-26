@@ -33,9 +33,15 @@ Step 锚点跳到对应那份。
   **[`runtime-materialization-m1-spec.md`](runtime-materialization-m1-spec.md)**
   —— Runtime Materialization 总设计 + v0.3.0 M1 实现合同
   (`local_path` + `git_repo` + snapshot)。Walkthrough Step 3 + Step 7 的深度。
+- **[`evidence-guide.md`](evidence-guide.md)** —— 用户指南:解读 compare
+  report 的 evidence 四档(strong / medium / weak / unknown)、怎么升级、
+  为什么 supplied evidence 不是 cloud attestation、harness package 怎么
+  影响 evidence、probe 跟 evidence 什么关系。**读 compare report 之前
+  先看这份。**
 - **[`evidence-aware-result.md`](evidence-aware-result.md)** —— v0.4 evidence
-  四级标签 (strong / medium / weak / unknown) 推断规则 + score JSON +
-  compare report `## Evidence` section。Walkthrough Step 8 的深度。
+  四级标签 (strong / medium / weak / unknown) **推断规则合同**(实现导向)+
+  score JSON + compare report `## Evidence` section。Walkthrough Step 8 的
+  深度。用户层解读看上面 `evidence-guide.md`。
 - **[`harness-package-mvp.md`](harness-package-mvp.md)** —— v0.5 harness
   package 目录格式、`harness_package: <id>@<version>` frontmatter、install
   order (materialize → package → patch → snapshot)、三个 hash 字段。
@@ -79,6 +85,7 @@ Step 锚点跳到对应那份。
 - **首次接触** → `product-walkthrough.md` + `examples/sample-workspace/`
 - **产品定位** → `product-definition.md`
 - **具体填什么文件** → `file-formats.md`
+- **解读 evidence(weak/medium/strong/unknown 各是什么)** → `evidence-guide.md`
 - **某档 MVP 的深度** → `runtime-materialization.md` / `evidence-aware-result.md`
   / `harness-package-mvp.md` / `runtime-probe-mvp.md`
 - **版本路线** → `roadmap.md`

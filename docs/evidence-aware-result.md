@@ -12,6 +12,12 @@
 > [`product-walkthrough.md`](product-walkthrough.md) 起。可运行 sample:
 > [`examples/sample-workspace/`](../examples/sample-workspace/) — 跑完后
 > `compare-*.md` 顶部 `## Evidence` section 是 v0.4 evidence 链的产物。
+>
+> **User-facing companion**: [`evidence-guide.md`](evidence-guide.md) ——
+> 这份 spec 是实现合同(level 推断规则、JSON schema、graceful 降级路径);
+> evidence-guide 是用户层解读手册(每档什么时候可信、weak → medium 怎么
+> 升、worked examples、AHL 不证明什么)。两份互补 —— 如果只读一份,新用户
+> 先读 evidence-guide,改 code 的时候再读这份。
 
 ---
 

@@ -49,7 +49,7 @@ Probe 产物落到 `experiments/<id>/probe-results/<probe_id>/<variant_id>.json`
 
 每个 variant 分数上的一个四级标签(`strong` / `medium` / `weak` / `unknown`),由 runtime snapshot 加可选的 `materials/*-evidence.md` 文件推断。`strong` 表示 AHL 自己 materialize 了 runtime,而且(variant 用了 package 的话)完整 fingerprint 了 package。`weak` / `unknown` 表示 AHL 不能证明实际跑了什么——典型情况是 legacy `connect.md` 适配器或没补 attestation 的 cloud agent。
 
-Evidence 在 compare report **顶部**作为 `## Evidence` section 出现。重点不是 block 决策——是让你做 `keep / discard / next` 判断的时候,对这次数据能信几分心里有数。深度细节:[`docs/evidence-aware-result.md`](docs/evidence-aware-result.md)。
+Evidence 在 compare report **顶部**作为 `## Evidence` section 出现。重点不是 block 决策——是让你做 `keep / discard / next` 判断的时候,对这次数据能信几分心里有数。用户指南:[`docs/evidence-guide.md`](docs/evidence-guide.md)(每档什么时候可信、weak → medium 怎么升、为何 supplied evidence ≠ cloud attestation)。实现合同:[`docs/evidence-aware-result.md`](docs/evidence-aware-result.md)。
 
 ## 8. 最简端到端流程
 

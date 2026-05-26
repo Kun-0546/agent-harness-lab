@@ -49,7 +49,7 @@ Probe-results land at `experiments/<id>/probe-results/<probe_id>/<variant_id>.js
 
 A four-level label on every variant's score (`strong` / `medium` / `weak` / `unknown`) inferred from the runtime snapshot plus optional `materials/*-evidence.md` files. `strong` means AHL materialized the runtime itself and (if the variant uses a package) fingerprinted it completely. `weak` / `unknown` means AHL couldn't prove what actually ran — typically a legacy `connect.md` adapter or a cloud agent without supplied attestation.
 
-Evidence shows up at the **top of the compare report** as a `## Evidence` section. The point is not to block decisions — it's to let you make `keep / discard / next` calls with eyes open on how much you can trust the numbers. Depth detail: [`docs/evidence-aware-result.md`](docs/evidence-aware-result.md).
+Evidence shows up at the **top of the compare report** as a `## Evidence` section. The point is not to block decisions — it's to let you make `keep / discard / next` calls with eyes open on how much you can trust the numbers. User guide: [`docs/evidence-guide.md`](docs/evidence-guide.md) (when to trust each level, how to upgrade weak → medium, why supplied evidence is not cloud attestation). Implementation contract: [`docs/evidence-aware-result.md`](docs/evidence-aware-result.md).
 
 ## 8. Simplest end-to-end workflow
 
