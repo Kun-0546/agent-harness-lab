@@ -6,6 +6,12 @@
 >
 > Status: target v0.4.0,branch `v0.4.0-evidence-aware-result`。
 > Date: 2026-05-25。
+>
+> 本文是 `product-walkthrough.md` **Step 8 (inspect evidence)** 的
+> depth-detail。还没读 walkthrough 的从
+> [`product-walkthrough.md`](product-walkthrough.md) 起。可运行 sample:
+> [`examples/sample-workspace/`](../examples/sample-workspace/) — 跑完后
+> `compare-*.md` 顶部 `## Evidence` section 是 v0.4 evidence 链的产物。
 
 ---
 

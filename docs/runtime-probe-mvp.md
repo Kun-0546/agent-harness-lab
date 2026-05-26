@@ -11,6 +11,13 @@
 > Date: 2026-05-26。
 > 上游约束:Kun 标准 redlines + Kun 初步偏好 "Option C 最小化"(`ahl probe`
 > 新 CLI + `ahl review` 只显示已有 probe artifact,不自动跑 probe)。
+>
+> 本文是 `product-walkthrough.md` **Step 6.5 (probe runtime readiness)**
+> 的 depth-detail。还没读 walkthrough 的从
+> [`product-walkthrough.md`](product-walkthrough.md) 起。可运行 sample:
+> [`examples/sample-workspace/`](../examples/sample-workspace/) —
+> `ahl probe 001` 对两 variant 跑只读 readiness 检查,产物落到
+> `probe-results/probe-*/V*.json`。
 
 ---
 

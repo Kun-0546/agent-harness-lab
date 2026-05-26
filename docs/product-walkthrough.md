@@ -3,6 +3,11 @@
 > 这份文档讲 AHL 的完整产品流程：从「我想改善某个 agent」到「我做出 keep/discard 决策」走 9 步。
 > 你不用一口气读完——按当前在哪一步,跳到对应章节即可。
 >
+> **可运行 sample**(零 API key、纯本地、确定性):
+> [`examples/sample-workspace/`](../examples/sample-workspace/) — 跟着
+> `examples/sample-workspace/README.md` 的 5 步 recipe 跑一遍,
+> 一次性把 Step 3 / 5 / 6.5 / 7 / 8 全走完。
+>
 > 想看产品定位和概念架构:[`docs/product-definition.md`](product-definition.md)
 > 想看具体文件格式:[`docs/file-formats.md`](file-formats.md)
 > 想看 runtime materialization 细节:[`docs/runtime-materialization.md`](runtime-materialization.md)

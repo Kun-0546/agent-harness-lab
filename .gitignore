@@ -14,3 +14,9 @@ temp/
 .DS_Store
 .idea/
 .vscode/
+
+# v0.7 sample workspace — generated artifacts (do not commit)
+examples/sample-workspace/experiments/*/results/
+examples/sample-workspace/experiments/*/probe-results/
+examples/sample-workspace/experiments/*/sandbox/
+examples/sample-workspace/experiments/*/materials/runtime-evidence.md

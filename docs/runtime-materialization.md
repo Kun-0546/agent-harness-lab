@@ -12,6 +12,12 @@
 > 优化、calibration、Auto mode + approval gates。
 >
 > 日期:2026-05-21 (设计),2026-05-23 (M1 完成)。
+>
+> 本文是 `product-walkthrough.md` **Step 3 (declare runtime boundary) +
+> Step 7 (run experiment)** 的 depth-detail。如果还没读 walkthrough,从
+> [`product-walkthrough.md`](product-walkthrough.md) 起。可运行 sample:
+> [`examples/sample-workspace/`](../examples/sample-workspace/) — 用
+> `local_path` runtime source 跑完整 materialize → snapshot → start 链。
 
 ---
 

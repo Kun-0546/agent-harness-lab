@@ -9,6 +9,13 @@
 > Date: 2026-05-26。
 > 上游约束:Kun 5 项 corrections 已并入(install order / 必须 materialized
 > runtime / 版本化目录 / evidence 规则 / snapshot 字段名)。
+>
+> 本文是 `product-walkthrough.md` **Step 5 (design harness variants) +
+> Step 7 (run experiment)** 的 depth-detail。还没读 walkthrough 的从
+> [`product-walkthrough.md`](product-walkthrough.md) 起。可运行 sample:
+> [`examples/sample-workspace/`](../examples/sample-workspace/) — V2 引用
+> `concise-prompt@0.1.0` package,跑完后 V2 snapshot 含完整的
+> manifest_hash + payload_hash + effective_harness_hash。
 
 ---
 
