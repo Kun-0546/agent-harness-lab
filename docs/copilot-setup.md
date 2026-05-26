@@ -223,6 +223,10 @@ handoff message 里列出来。
 - `ahl review / probe (可选) / run / score / compare` 全 exit 0
 - compare 报告 `## Evidence` section 的 evidence level 跟 brief.md §8
   目标对齐(不达标 → 补 `materials/*-evidence.md` → 再跑 `ahl compare`)
+- 一个完整跑通的实验应能用 `ahl compare` 解释 baseline harness (V1)
+  跟 candidate harness (V2+) 的差异 —— 这是 co-pilot setup 的最终目
+  的。compare 报告里读不出差异,说明 cases / rubric / variants 中至
+  少一项需要回头改
 
 setup-state 示例见
 [`examples/copilot-setup-example/`](../examples/copilot-setup-example/);

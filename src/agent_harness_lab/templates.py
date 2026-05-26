@@ -317,6 +317,10 @@ locked.md 里加。>
 - compare 报告里 `## Evidence` section 的 level 跟「Evidence / probe
   expectations」目标对齐(不达标说明 evidence 路径需补
   materials/*-evidence.md)
+- 一个完整跑通的实验应能用 `ahl compare` 解释 baseline harness (V1)
+  跟 candidate harness (V2+) 的差异 —— 这是 co-pilot setup 的最终
+  目的;compare 报告里读不出差异,说明 cases / rubric / variants 中
+  至少一项需要回头改
 
 `expected-coding-agent-plan.md` 这种交付物可参考
 [`examples/copilot-setup-example/`](../../examples/copilot-setup-example/)。>
