@@ -9,7 +9,7 @@
 > - **exploring** — 方向明确,具体 spec / 优先级待定
 > - **future** — 长期方向,依赖前序 milestones 成熟
 >
-> 日期:2026-05-25。每次 minor release 时回顾更新。
+> 日期:2026-05-26。每次 minor release 时回顾更新。
 
 ---
 
@@ -104,34 +104,68 @@ cases / rubric / simulator —— 那些属于 experiment 不属于 harness。
 
 ---
 
-## v0.7 — Co-pilot Setup Productization [exploring]
+## v0.7 — Complete Product Flow MVP [shipped]
 
-**目标**:把当前 Co-pilot 模式(外层 coding agent + `brief.md` + `materials/`)
-的 ergonomics 打磨成"真正能让新用户跑通"的入口。
+**目标**:把已经实装的 v0.3.0 runtime materialization、v0.4 evidence、v0.5
+harness package、v0.6 runtime probe 收敛到一条"完整可跑的产品流",让一个
+刚 clone 的新用户能在 <30 分钟内、零 API key、零云端、零外部依赖,跑完一次
+完整的 probe → run → score → compare。**内部产品完成**,**不是** public
+launch / PyPI / 公开发布 / visibility flip。
+
+> 原 v0.7 计划方向("Co-pilot Setup Productization")在 2026-05-26 调整为
+> "Complete Product Flow MVP" — 见 `docs/product-flow-completion.md`。
+> Co-pilot ergonomics 打磨延后到 v0.8+ exploring。
 
 **主要交付**:
 
-- `materials/README.md` 模板分场景(新实验 / 迭代 / 调试)
-- `brief.md` 校验器,在 review 阶段提示常见空段
-- coding agent 入口文档(`docs/coding-agent-guide.md`),取代历史
-  `agent-authoring-guide.md`
+- `examples/sample-workspace/` — 端到端可跑的 sample,纯本地 + 离线 +
+  零 API key:tiny-runtime + `concise-prompt@0.1.0` harness package +
+  1 实验(V1 baseline vs V2 packaged harness)× 2 cases
+- 完整 product flow validation:`ahl probe → run → score → compare`
+  落 probe-results / run records / snapshots / score evidence / compare
+  Evidence section
+- snapshot `harness_package` 块完整 fingerprint(manifest_hash +
+  payload_hash + effective_harness_hash)在 sample 中可见
+- README + README_CN 围绕 9 个概念问题重写(AHL / problem / runtime /
+  harness / harness package / probe / evidence / simplest workflow /
+  not-yet-implemented),EN/CN 1:1
+- docs/README.md 加 "首次接触推荐顺序" 路径;product-walkthrough.md +
+  4 份 MVP spec 互相 cross-link
+- 3 个 sample workspace E2E acceptance tests(465 总数)+ 跨 run 评分确定性
+  + 仓内 sample 不含生成产物的保证
+- v0.7 spec(`docs/product-flow-completion.md`)18 节,作为本档实施合同
 
-**关键依赖**:v0.4 evidence-aware result(Co-pilot 路径主要消费者)。
+**关键依赖**:v0.3.0 + v0.4 + v0.5 + v0.6(全部已 shipped)。
+
+**显式不做**:不加 CLI 命令、不加 src 模块、不变 snapshot / evidence /
+scoring / package / probe 合同、不发 PyPI、不公开仓、不发 announcement。
 
 ---
 
-## v0.8 — Iteration Loop [exploring]
+---
 
-**目标**:把 keep/discard/next 决策从"靠人判断"变成"有命令辅助",但仍保留
-人最终拍板。
+## v0.8 — Product Reliability / Co-pilot Productization [exploring]
 
-**主要交付**:
+**目标**:在 v0.7 完整产品流的基础上,补 product reliability 与原计划 v0.7
+未落地的 Co-pilot 入口打磨。具体方向待 v0.8 spec 决定。
 
-- `ahl iterate <experiment>` 命令,基于 compare report 推荐下一轮 variant 方向
-- iteration history 在 `goal.md` / `brief.md` 留痕
-- 跨实验的 baseline 演进追踪
+**候选方向**(待选,见 `temp/v0.8.0-planning.md`):
 
-**关键依赖**:v0.4 + v0.7。
+- `ahl package inspect / validate` —— 让 harness package 离 install
+  之前能 read-only 检查 manifest / payload 完整度
+- probe ↔ snapshot 更紧的绑定(snapshot 引用最近一次成功 probe id)
+- evidence import 改进(`materials/*-evidence.md` 解析 + write-evidence
+  覆盖更多 source 类型)
+- product acceptance hardening(更多边界 case 的 E2E 覆盖、CI workflow
+  可选项)
+- 原 v0.7 计划的 Co-pilot ergonomics(`materials/README.md` 模板分场景、
+  `brief.md` 校验、coding agent 入口文档)
+- `ahl iterate <experiment>`(可推迟到 v0.9)
+
+**关键依赖**:v0.7 Complete Product Flow MVP(已 shipped)。
+
+**显式不做**:public launch、PyPI、visibility flip — 公开发布作为 future
+option,不是 v0.8 默认轨。
 
 ---
 
