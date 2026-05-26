@@ -242,7 +242,7 @@ scoring math / 删 v0.7 sample workspace / 删 manual mode。
 
 ---
 
-## v0.10 — Open-Source Readiness Freeze / Release Candidate / Final Acceptance [exploring]
+## v0.10 — Open-Source Readiness Freeze / Release Candidate / Final Acceptance [shipped]
 
 **主线目标**:把 v0.3.1 → v0.9 累计的产品 surface 收口到 OSS-ready 状
 态 —— freeze CLI / file format / API,跑完整 acceptance,产出 release

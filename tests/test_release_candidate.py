@@ -305,6 +305,26 @@ def _parse_changelog_versions() -> list[str]:
             if m.group("version").lower() != "unreleased"]
 
 
+_PYPROJECT_VERSION_RE = re.compile(
+    r'^version\s*=\s*"([^"]+)"', re.MULTILINE)
+
+
+def _read_pyproject_version() -> str | None:
+    """Read the ``version = "X.Y.Z"`` line from pyproject.toml.
+
+    Returns ``None`` if the file or field can't be read.
+    """
+    p = REPO_ROOT / "pyproject.toml"
+    if not p.exists():
+        return None
+    try:
+        text = p.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+    m = _PYPROJECT_VERSION_RE.search(text)
+    return m.group(1) if m else None
+
+
 def _git_tags_descending_semver() -> list[str]:
     """Return git tags sorted descending by semver (strip leading 'v')."""
     result = subprocess.run(
@@ -339,16 +359,32 @@ class TestChangelogTagOrder(unittest.TestCase):
                       "placeholder section (Keep-a-Changelog 1.1).")
 
     def test_changelog_subset_of_tags(self):
-        """Every CHANGELOG version must have a matching git tag.
+        """Every CHANGELOG version must have a matching git tag,
+        with one allowed exception: a release-prep transient state
+        in which the most recent CHANGELOG version matches the
+        current ``pyproject.toml`` version but has not been tagged
+        yet (the tag will be created in the next step of the
+        release cycle, pointing at the release-prep commit).
 
         v0.10 explicitly allows tags that pre-date the
         Keep-a-Changelog adoption (v0.1.0 / v0.2.0) to lack a
-        CHANGELOG entry; the inverse direction (CHANGELOG entry
-        without a tag) is a hard fail.
+        CHANGELOG entry. The inverse direction (CHANGELOG entry
+        without a tag) is a hard fail EXCEPT for that one
+        release-prep transient.
         """
         cl_versions = set(_parse_changelog_versions())
         tag_versions = set(_git_tags_descending_semver())
         extra_in_changelog = cl_versions - tag_versions
+        if not extra_in_changelog:
+            return
+        # Allow exactly one transient: highest CHANGELOG version
+        # matches the pyproject version (release-prep just landed,
+        # tag step pending).
+        pyproject_version = _read_pyproject_version()
+        if (extra_in_changelog == {pyproject_version}
+                and pyproject_version in cl_versions):
+            # Release-prep transient — allowed.
+            return
         self.assertFalse(
             extra_in_changelog,
             f"CHANGELOG has version sections without matching git "
