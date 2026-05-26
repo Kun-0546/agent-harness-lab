@@ -470,6 +470,19 @@ def cmd_review(args: argparse.Namespace) -> int:
     if result.warnings:
         print(f"  校验提醒:{len(result.warnings)} 处(详见 review.md);"
               f"建议修完再跑 ahl run")
+    # v0.6: probe summary 显示 (review 是 read-only, 不触发 probe;
+    # spec docs/runtime-probe-mvp.md §5)。
+    if result.probe_summary:
+        s = result.probe_summary
+        c = s.get("counts") or {}
+        total = s.get("total", 0)
+        print(f"  Last probe: {s['probe_id']} · "
+              f"{c.get('ok', 0)}/{total} ok / "
+              f"{c.get('warn', 0)} warn / "
+              f"{c.get('fail', 0)} fail")
+    else:
+        print(f"  No probe artifact yet — run `ahl probe {args.experiment}` "
+              f"to verify runtime ready (read-only check)")
     if not (result.missing or result.broken or result.skipped or result.warnings):
         print(f"  齐了 —— 没问题就 ahl run {args.experiment}")
     else:
@@ -477,6 +490,78 @@ def cmd_review(args: argparse.Namespace) -> int:
               f"docs/product-walkthrough.md + docs/file-formats.md "
               f"起草 / 修正,再跑 ahl review {args.experiment}")
     return 0
+
+
+def cmd_probe(args: argparse.Namespace) -> int:
+    """v0.6 Runtime Probe — pre-run inspection (read-only)。
+
+    spec: docs/runtime-probe-mvp.md。退出码:任一 variant fail → 1;否则 0
+    (不阻塞 future ahl run; advisory only)。
+    """
+    exp_dir = _find_experiment(args.experiment)
+    if exp_dir is None:
+        print(f"找不到实验:{args.experiment}", file=sys.stderr)
+        return 1
+    try:
+        result = workflow.probe(
+            exp_dir,
+            smoke_command=args.smoke_command,
+            write_evidence=args.write_evidence,
+            timeout=args.timeout,
+        )
+    except workflow.WorkflowError as e:
+        print(str(e), file=sys.stderr)
+        return 1
+
+    print(f"Probe: {exp_dir.name}  (probe_id: {result.probe_id})")
+    for vid, art in result.variants.items():
+        st = art.get("status", "?")
+        rs = art.get("runtime_source") or {}
+        pkg = art.get("harness_package")
+        sc = art.get("start_command") or {}
+        rs_type = rs.get("type", "?")
+        rs_name = rs.get("name") or "—"
+        pkg_str = pkg.get("ref", "—") if pkg else "—"
+        sc_src = sc.get("source", "?")
+        smoke = ""
+        if sc.get("smoke_executed"):
+            smoke = (f" smoke={sc.get('smoke_status', '?')}"
+                     f"(exit {sc.get('exit_code', '?')})")
+        print(f"  {vid}  status={st}  runtime={rs_type}:{rs_name}  "
+              f"package={pkg_str}  start_command={sc_src}{smoke}")
+        if st != "ok":
+            for sub_name, sub in (("runtime_source", rs),
+                                   ("harness_package", pkg),
+                                   ("start_command", sc)):
+                if not sub or not isinstance(sub, dict):
+                    continue
+                if sub.get("status") in ("warn", "fail"):
+                    for r in sub.get("reasons", []):
+                        print(f"      {sub_name}: {r}")
+
+    counts = result.counts
+    total = sum(counts.values())
+    print(f"\nartifact: {result.probe_dir}")
+    print(f"summary: {counts.get('ok', 0)}/{total} ok, "
+          f"{counts.get('warn', 0)} warn, "
+          f"{counts.get('fail', 0)} fail, "
+          f"{counts.get('skip', 0)} skip")
+
+    if result.evidence_writes:
+        for ev_path in result.evidence_writes:
+            print(f"materials evidence written: {ev_path}")
+    elif args.write_evidence:
+        if result.materialized_write_skipped:
+            print(f"⚠ --write-evidence: skipped materialized variants "
+                  f"({', '.join(result.materialized_write_skipped)}); "
+                  f"materialized variants 已有 strong evidence path "
+                  f"(spec docs/runtime-probe-mvp.md §7.4)")
+        else:
+            print("⚠ --write-evidence: no legacy_connect variants with "
+                  "ok/warn status; nothing written")
+
+    # spec §16 locked decision 4: any fail → exit 1; otherwise 0
+    return 1 if counts.get("fail", 0) > 0 else 0
 
 
 def cmd_simulator(args: argparse.Namespace) -> int:
@@ -609,6 +694,25 @@ def build_parser() -> argparse.ArgumentParser:
                                help="读实验里现有文件出 review.md(宽松,缺什么标未起草)")
     p_review.add_argument("experiment", help="实验编号或名字")
     p_review.set_defaults(func=cmd_review)
+
+    # v0.6: Runtime Probe MVP (spec docs/runtime-probe-mvp.md)
+    p_probe = sub.add_parser(
+        "probe",
+        help="对实验做 pre-run inspection (read-only;不创建 sandbox / 不修改 source)")
+    p_probe.add_argument("experiment", help="实验编号或名字")
+    p_probe.add_argument(
+        "--command", default=None, dest="smoke_command",
+        help="legacy_connect variant 的 smoke command (用户责任;"
+             "捕获 stdout/stderr 各 ≤1KB)。注:dest=smoke_command 避开 "
+             "subparsers dest='command' 命名冲突")
+    p_probe.add_argument(
+        "--write-evidence", action="store_true",
+        help="对 ok/warn legacy_connect variant 写 "
+             "materials/runtime-evidence.md;fail 不写")
+    p_probe.add_argument(
+        "--timeout", type=int, default=30,
+        help="smoke command 超时秒数 (default 30,仅作用于 --command)")
+    p_probe.set_defaults(func=cmd_probe)
 
     return parser
 

@@ -110,6 +110,21 @@ class ReviewResult:
     broken: list[str]    # parse 失败的产物 —— 文件存在但读不出来,格式 "name(解析失败:msg)"
     skipped: list[str]   # 未检查的产物 —— 自己没坏,但依赖的文件坏了(如 cases 依赖 program 读对话模式)
     warnings: list[str]  # validate() 校验提醒 —— brief 未填全、rubric 权重错、case 缺起始输入 等
+    # v0.6:Runtime Probe 最近一次结果摘要 (None = 无 probe artifact;read-only,不触发 probe)
+    probe_summary: dict | None = None
+
+
+@dataclass
+class ProbeRunResult:
+    """一次 ahl probe 的产出 (v0.6)."""
+
+    probe_id: str
+    probe_dir: Path
+    variants: dict   # variant_id → artifact dict
+    overall_status: str
+    counts: dict[str, int]
+    evidence_writes: list[str]
+    materialized_write_skipped: list[str]
 
 
 def baseline_problems(versions: list[Version], compare_mode: str) -> list[str]:
@@ -597,8 +612,151 @@ def review(exp_dir: Path) -> ReviewResult:
                           rubric, simulator)
     out_path = exp_dir / "review.md"
     out_path.write_text(text, encoding="utf-8")
+
+    # v0.6:review 是 read-only — 读最近一次 probe artifact 做摘要展示;
+    # **不**触发 probe (spec docs/runtime-probe-mvp.md §5)。
+    from agent_harness_lab.probe import summarize_latest_probe
+    probe_summary = summarize_latest_probe(exp_dir)
+
     return ReviewResult(out_path=out_path, missing=missing, broken=broken,
-                        skipped=skipped, warnings=warnings)
+                        skipped=skipped, warnings=warnings,
+                        probe_summary=probe_summary)
+
+
+def probe(exp_dir: Path, smoke_command: str | None = None,
+          write_evidence: bool = False,
+          timeout: int = 30) -> ProbeRunResult:
+    """v0.6 Runtime Probe — pre-run inspection of each variant (read-only).
+
+    Spec: docs/runtime-probe-mvp.md.
+
+    - 不创建 sandbox
+    - 不安装 package
+    - 不修改 runtime source
+    - 不消费 / 不修改 snapshot
+    - 仅读 + 可选执行 user-supplied smoke command
+    - `--write-evidence` 仅对 legacy_connect variant + status ∈ {ok, warn} 触发
+      materials/runtime-evidence.md 写入 (spec §7.4 correction)
+
+    抛 WorkflowError 的场景:
+    - 实验找不到
+    - harnesses/ 加载失败
+    - probe artifact 写盘失败 (per-variant artifact 是该 probe 的唯一持久化输出)
+    其它 per-variant 问题 (runtime/path 缺失等) 在 artifact 内以 status=fail
+    + reasons 记录,不抛错。
+    """
+    from agent_harness_lab.harness_package import (
+        discover_packages,
+        parse_variant_ref,
+    )
+    from agent_harness_lab.probe import (
+        STATUS_FAIL,
+        STATUS_OK,
+        STATUS_SKIP,
+        STATUS_WARN,
+        make_probe_id,
+        probe_variant,
+        write_artifact,
+        write_runtime_evidence_md,
+    )
+
+    versions = _safe_call("harnesses/", load_versions, exp_dir)
+    if not versions:
+        raise WorkflowError(f"实验里没有 variants 可 probe:{exp_dir}")
+
+    workspace_root = exp_dir.parents[1]
+    connect_path = workspace_root / "connect.md"
+    connect = parse_connect(connect_path) if connect_path.exists() else None
+    sources_path = workspace_root / "runtime-sources.md"
+    runtime_sources = _safe_call(
+        "runtime-sources.md", parse_runtime_sources, sources_path)
+    packages_index = _safe_call(
+        "harness-packages/", discover_packages, workspace_root)
+
+    # Build variant_packages map (best-effort; probe records mismatches as
+    # per-variant fail rather than aborting probe).
+    variant_packages: dict[str, object] = {}
+    for v in versions:
+        if v.harness_package is None:
+            continue
+        try:
+            pkg_id, pkg_version = parse_variant_ref(v.harness_package)
+        except ValueError:
+            continue  # probe_harness_package will surface this
+        manifest = packages_index.get((pkg_id, pkg_version))
+        if manifest is not None:
+            variant_packages[v.version_id] = manifest
+
+    ctx = MaterializeContext(
+        run_id="",
+        experiment_dir=exp_dir,
+        fallback_connect=connect,
+        runtime_sources=runtime_sources,
+        variant_packages=variant_packages,
+    )
+
+    probe_id = make_probe_id()
+    probe_dir = exp_dir / "probe-results" / probe_id
+
+    artifacts: list[dict] = []
+    for v in versions:
+        manifest = variant_packages.get(v.version_id)
+        artifact = probe_variant(v, ctx, manifest, smoke_command, timeout)
+        artifact["probe_id"] = probe_id
+        artifact["experiment"] = exp_dir.name
+        try:
+            write_artifact(probe_dir, v.version_id, artifact)
+        except OSError as e:
+            raise WorkflowError(
+                f"probe artifact 写失败 (variant {v.version_id}):{e}") from e
+        artifacts.append(artifact)
+
+    counts = {STATUS_OK: 0, STATUS_WARN: 0, STATUS_FAIL: 0, STATUS_SKIP: 0}
+    for a in artifacts:
+        s = a.get("status")
+        if s in counts:
+            counts[s] += 1
+    if counts[STATUS_FAIL] > 0:
+        overall = STATUS_FAIL
+    elif counts[STATUS_WARN] > 0 or counts[STATUS_SKIP] > 0:
+        overall = STATUS_WARN
+    else:
+        overall = STATUS_OK
+
+    evidence_writes: list[str] = []
+    materialized_write_skipped: list[str] = []
+
+    if write_evidence:
+        # spec §7.4 correction: legacy_connect + ok/warn only.
+        # materialized variants → no-op + warning bookkeeping.
+        legacy_eligible = []
+        for a in artifacts:
+            rs = a.get("runtime_source") or {}
+            if rs.get("type") != "legacy_connect":
+                materialized_write_skipped.append(a.get("variant_id", "?"))
+                continue
+            if a.get("status") in (STATUS_OK, STATUS_WARN):
+                legacy_eligible.append(a)
+        if legacy_eligible:
+            materials_dir = exp_dir / "materials"
+            try:
+                ev_path = write_runtime_evidence_md(
+                    materials_dir, legacy_eligible)
+            except OSError as e:
+                raise WorkflowError(
+                    f"materials/runtime-evidence.md 写失败:{e}") from e
+            if ev_path is not None:
+                evidence_writes.append(str(ev_path))
+
+    return ProbeRunResult(
+        probe_id=probe_id,
+        probe_dir=probe_dir,
+        variants={a["variant_id"]: a for a in artifacts},
+        overall_status=overall,
+        counts=counts,
+        evidence_writes=evidence_writes,
+        materialized_write_skipped=materialized_write_skipped,
+    )
 
 
 def _build_review(exp_name, brief, program, versions, cases, rubric, simulator) -> str:

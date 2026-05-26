@@ -439,8 +439,9 @@ class TestV04RedLines(unittest.TestCase):
         for cmd in expected:
             self.assertIn(cmd, result.stdout,
                           f"missing subcommand {cmd!r} in --help output")
-        # No surprise new commands
-        forbidden = ["evidence", "probe", "pack", "iterate", "auto"]
+        # No surprise new commands. v0.6 explicitly adds 'probe' (spec
+        # docs/runtime-probe-mvp.md §9), so it's removed from forbidden.
+        forbidden = ["evidence", "pack", "iterate", "auto"]
         # 'auto' is allowed as --mode value but not as top-level subcommand —
         # parse the positional <command> section only.
         cmd_section = result.stdout.split("positional arguments")[1].split(

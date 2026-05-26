@@ -214,6 +214,25 @@ score 含至少一条 entry,Evidence section 一定在 compare report 里出现*
 
 ---
 
+## 6.1 v0.6: probe → materials/runtime-evidence.md → v0.4 升级 channel
+
+v0.6 加 `ahl probe --write-evidence`(详见
+[`runtime-probe-mvp.md`](runtime-probe-mvp.md))。对 legacy_connect variant
++ probe status ∈ {ok, warn} 时,probe **自动写**
+`materials/runtime-evidence.md`,内容含 probe_id / variant_id / status /
+captured_at / checks performed / smoke command + truncated stdout/stderr /
+limitations。
+
+下次 `ahl score` 推断 evidence 时,`_detect_materials_evidence` 扫到该
+文件 → 按 v0.4 §3.3 规则,legacy_connect weak → medium。**v0.4 evidence
+推断规则本身不变**;probe 只是把"写 materials evidence"这步从用户手工
+变成 `ahl probe --write-evidence` 自动化。
+
+probe status = fail 时**不写** materials 文件(spec §7.4 correction),
+避免假证据污染 evidence 链。
+
+---
+
 ## 7. What v0.4 does NOT change
 
 - `results/run-*.json` schema 不动 — `snapshot_id` 已 v0.3.0 加好。
