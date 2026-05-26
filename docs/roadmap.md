@@ -37,7 +37,7 @@ cleanup 收口到可公开发布的 baseline。
 
 ---
 
-## v0.4 — Evidence-Aware Result [planned]
+## v0.4 — Evidence-Aware Result [shipped]
 
 **目标**:让 `score` / `compare` 输出携带 evidence level 元数据,使决策时能
 明确"这一轮的证据强度是 strong / medium / weak"。
