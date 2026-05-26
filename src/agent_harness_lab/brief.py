@@ -55,14 +55,35 @@ class Brief:
 
 
 def parse_brief(path: str | Path) -> Brief:
-    """读 brief.md,解析成 Brief。"""
+    """读 brief.md,解析成 Brief。
+
+    v0.9 把 BRIEF_TEMPLATE 重写为 12 section co-pilot 工作单
+    (`docs/copilot-setup.md` §4.1)。`parse_brief` 同时支持 v0.9 新
+    section 名 + v0.3.1 历史 section 名 —— 两版模板都能干净解析。
+
+    映射(优先 v0.9 → 回落 v0.3.1):
+    - optimize ← 「想优化什么」(两版同名)
+    - change   ← 「Harness 假设」(v0.9 §5) → 回落 「验证什么改动」(v0.3.1)
+    - care     ← 「Rubric 应该如何判断」(v0.9 §7) → 回落 「最在意什么」
+    - redlines ← 「Files the coding agent should not change」(v0.9 §10)
+                 → 回落 「不能牺牲什么」
+    - compare  ← 「怎么比」(v0.3.1 only;v0.9 未保留同义段)
+    """
     path = Path(path)
     sections = mdutil.split_sections(path.read_text(encoding="utf-8"))
+
+    def _pick(*keys: str) -> str:
+        for k in keys:
+            if k in sections:
+                return sections[k].strip()
+        return ""
+
     return Brief(
         path=path,
-        optimize=sections.get("想优化什么", "").strip(),
-        change=sections.get("验证什么改动", "").strip(),
-        care=sections.get("最在意什么", "").strip(),
-        redlines=sections.get("不能牺牲什么", "").strip(),
-        compare=sections.get("怎么比", "").strip(),
+        optimize=_pick("想优化什么"),
+        change=_pick("Harness 假设", "验证什么改动"),
+        care=_pick("Rubric 应该如何判断", "最在意什么"),
+        redlines=_pick("Files the coding agent should not change",
+                       "不能牺牲什么"),
+        compare=_pick("怎么比"),
     )

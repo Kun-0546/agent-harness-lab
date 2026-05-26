@@ -84,7 +84,7 @@ pip install -e .
 `ahl` 暴露三种 setup mode(完整 flow 见 [`docs/product-walkthrough.md`](docs/product-walkthrough.md) Step 2):
 
 - **Manual** —— 你自己设计 harness variants 和实验;`ahl` 校验、运行、评分、比较。**已实现。**
-- **Co-pilot** *(默认)* —— 外层 coding agent(Claude Code / Cursor / Codex)通过对话与你协作,维护 `brief.md` 和 `materials/`,并生成或补全实验文件。**已实现。**
+- **Co-pilot** *(默认)* —— 外层 coding agent(Claude Code / Cursor / Codex)通过对话与你协作,维护 `brief.md` 和 `materials/`,并生成或补全实验文件。**已实现。** 驱动指南:[`docs/copilot-setup.md`](docs/copilot-setup.md);setup-state 示例:[`examples/copilot-setup-example/`](examples/copilot-setup-example/)。
 - **Auto** —— Agent 在规则、预算、审核门槛下自动迭代 harness;异常时喊你。**未来模式**(依赖 calibration + approval gates,M2+)。
 
 ## 命令

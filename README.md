@@ -84,7 +84,7 @@ This installs the `ahl` command. If your shell reports `ahl: command not found`,
 `ahl` exposes three setup modes (full flow in [`docs/product-walkthrough.md`](docs/product-walkthrough.md) Step 2):
 
 - **Manual** — you design harness variants and the experiment; `ahl` validates, runs, scores, compares. **Shipped.**
-- **Co-pilot** *(default)* — an external coding agent (Claude Code / Cursor / Codex) collaborates with you through conversation to maintain `brief.md` and `materials/`, and to generate or complete the experiment files. **Shipped.**
+- **Co-pilot** *(default)* — an external coding agent (Claude Code / Cursor / Codex) collaborates with you through conversation to maintain `brief.md` and `materials/`, and to generate or complete the experiment files. **Shipped.** Driving guide: [`docs/copilot-setup.md`](docs/copilot-setup.md); setup-state reference: [`examples/copilot-setup-example/`](examples/copilot-setup-example/).
 - **Auto** — agents iterate harnesses inside rules, budgets, and approval gates; escalate to you on anomalies. **Future mode** (depends on calibration + approval gates, M2+).
 
 ## Commands

@@ -196,6 +196,8 @@ class TestKeySpecsReachableFromDocsNav(unittest.TestCase):
         "harness-package-mvp.md",
         "product-flow-completion.md",
         "evidence-guide.md",
+        # v0.9 Co-pilot Setup Productization MVP
+        "copilot-setup.md",
     )
 
     def test_required_specs_linked_from_docs_readme(self):
@@ -218,6 +220,57 @@ class TestKeySpecsReachableFromDocsNav(unittest.TestCase):
         for name in self.REQUIRED_SPEC_FILENAMES:
             self.assertTrue((DOCS_DIR / name).exists(),
                               f"{DOCS_DIR / name} not found")
+
+
+# ===========================================================================
+# v0.9 Co-pilot setup: README + walkthrough cross-link to copilot-setup.md
+# ===========================================================================
+
+
+class TestCopilotSetupGuideCrosslinked(unittest.TestCase):
+    """v0.9 contract: README.md + README_CN.md + product-walkthrough.md must
+    all link to the new docs/copilot-setup.md guide (the default-mode driver
+    doc). Without these links, new users land in co-pilot mode but never
+    discover the operational guide."""
+
+    def _has_link_to(self, md_path: Path, target_filename: str) -> bool:
+        text = md_path.read_text(encoding="utf-8")
+        for _, link_path in _extract_links(text):
+            if _is_external_or_anchor(link_path):
+                continue
+            normalized = link_path.split("#", 1)[0].split("?", 1)[0].strip("/")
+            if normalized.endswith(target_filename):
+                return True
+        return False
+
+    def test_readme_links_to_copilot_setup(self):
+        readme = REPO_ROOT / "README.md"
+        self.assertTrue(readme.exists())
+        self.assertTrue(self._has_link_to(readme, "copilot-setup.md"),
+                        "README.md must link to docs/copilot-setup.md "
+                        "(v0.9 co-pilot driving guide)")
+
+    def test_readme_cn_links_to_copilot_setup(self):
+        readme_cn = REPO_ROOT / "README_CN.md"
+        self.assertTrue(readme_cn.exists())
+        self.assertTrue(self._has_link_to(readme_cn, "copilot-setup.md"),
+                        "README_CN.md must link to docs/copilot-setup.md "
+                        "(v0.9 co-pilot driving guide)")
+
+    def test_product_walkthrough_links_to_copilot_setup(self):
+        walkthrough = DOCS_DIR / "product-walkthrough.md"
+        self.assertTrue(walkthrough.exists())
+        self.assertTrue(self._has_link_to(walkthrough, "copilot-setup.md"),
+                        "docs/product-walkthrough.md must link to "
+                        "copilot-setup.md (Step 2 / Step 4 cross-link)")
+
+    def test_copilot_setup_example_exists_as_setup_state_reference(self):
+        """v0.9 spec §11 / Q4 lock: setup-state-only example must exist as
+        the co-pilot driving guide's primary reference."""
+        example = EXAMPLES_DIR / "copilot-setup-example"
+        self.assertTrue(example.is_dir(),
+                        "examples/copilot-setup-example/ must exist "
+                        "(v0.9 setup-state reference)")
 
 
 # ===========================================================================

@@ -93,24 +93,30 @@ class TestCmdNewCopilot(unittest.TestCase):
         content = (self.exp / "brief.md").read_text(encoding="utf-8")
         self.assertIn("# Brief — Co-pilot Experiment Setup", content)
 
-    def test_brief_md_section_titles_match_parse_brief_keys(self):
-        """Blocker fix (round 2): BRIEF_TEMPLATE 的 H2 标题必须跟
-        parse_brief 的 section keys 精确匹配。split_sections 用完整 H2
-        作 key,任何 (必填) (可选) 等后缀会破坏 parse 行为。
-
-        §1「想优化什么」必填提示放 placeholder 内部 (不是 H2 标题或外部
-        blockquote),保证 is_filled() 仍能识别 §1 缺失,M1 行为不退化。
-        """
+    def test_brief_md_has_12_section_anchors(self):
+        """v0.9 Co-pilot Setup Productization: BRIEF_TEMPLATE 12 节 H2
+        锚点必须全在且无后缀。section keys = split_sections 直接产物;
+        任何后缀(如 '(必填)')会破坏 parse_brief。"""
         content = (self.exp / "brief.md").read_text(encoding="utf-8")
-        # 5 个 parse_brief 已知 keys 必须精确出现
-        for key in ("想优化什么", "验证什么改动", "最在意什么",
-                    "不能牺牲什么", "怎么比"):
+        # v0.9 12 节 H2 锚点
+        for key in (
+            "想优化什么",
+            "目标行为",
+            "当前问题",
+            "Runtime 信息",
+            "Harness 假设",
+            "Cases 要覆盖什么",
+            "Rubric 应该如何判断",
+            "Evidence / probe expectations",
+            "Files the coding agent may create",
+            "Files the coding agent should not change",
+            "Acceptance commands",
+            "Done criteria",
+        ):
             self.assertIn(f"## {key}\n", content,
                           f"BRIEF_TEMPLATE 必须含精确标题 '## {key}\\n';"
                           f"任何后缀(如 '(必填)')会破坏 parse_brief")
-        # §6 材料段允许有 (可选) 后缀(它不在 parse_brief keys 里)
-        self.assertIn("## 材料 (可选)", content)
-        # 旧 bug 的反向断言:不应再有 "## 想优化什么 (必填)"
+        # §1 反向断言:不应再有 "## 想优化什么 (必填)"
         self.assertNotIn("## 想优化什么 (必填)", content,
                          "Blocker fix:'(必填)' 不能放在 H2 标题里")
         # "必填" 提示应在 §1 正文里(任意形式)
@@ -118,23 +124,25 @@ class TestCmdNewCopilot(unittest.TestCase):
                       "§1 应有'必填'提示在正文里")
 
     def test_brief_template_parseable_by_parse_brief(self):
-        """Blocker fix (round 2) 集成测试:用 BRIEF_TEMPLATE 写文件,
-        parse_brief 必须能识别 5 个 section keys(optimize / change / care /
-        redlines / compare),验证 split_sections 跟模板标题对得上。"""
+        """集成测试:用 BRIEF_TEMPLATE 写文件,parse_brief 必须能识别
+        v0.9 12-section 模板。compat 路径见 brief.parse_brief docstring。
+
+        v0.9 12 sections 不再保留 "怎么比" anchor,因此 compare 段允许空
+        (validate() 仅检查 §1「想优化什么」)。"""
         from agent_harness_lab.brief import parse_brief
         brief_path = self.exp / "brief.md"
         b = parse_brief(brief_path)
-        # 5 个 section keys 都应该有内容(占位符也算被读到 —— 不是空字符串)
+        # optimize / change / care / redlines 都应该读到 placeholder
         self.assertNotEqual(b.optimize, "",
                             "parse_brief 应读到 optimize 段(说明 H2 标题匹配)")
         self.assertNotEqual(b.change, "",
-                            "parse_brief 应读到 change 段")
+                            "parse_brief 应读到 change 段(v0.9: Harness 假设)")
         self.assertNotEqual(b.care, "",
-                            "parse_brief 应读到 care 段")
+                            "parse_brief 应读到 care 段(v0.9: Rubric 应该如何判断)")
         self.assertNotEqual(b.redlines, "",
-                            "parse_brief 应读到 redlines 段")
-        # compare 段可能空 / 占位符
-        # 但 §1 是 placeholder → is_filled 应为 False → validate 应报 §1 缺失
+                            "parse_brief 应读到 redlines 段(v0.9: "
+                            "Files the coding agent should not change)")
+        # §1 是 placeholder → is_filled 应为 False → validate 应报 §1 缺失
         problems = b.validate()
         self.assertTrue(
             any("想优化什么" in p for p in problems),
@@ -152,10 +160,10 @@ class TestCmdNewCopilot(unittest.TestCase):
                         "materials/README.md 应说明 locked.md 是产品约定")
 
     def test_materials_readme_mentions_evidence_concept(self):
-        """v0.3.1 Step 3: materials/README.md 应含 Runtime / Harness Evidence
-        节,并提及具体 evidence 文件名 (runtime-evidence / harness-evidence /
-        cloud-evidence 之一)。这是 Co-pilot 主路径下 coding agent 据 2×2
-        判断 evidence 的引导。"""
+        """v0.3.1 Step 3 + v0.9 §6 Evidence files: materials/README.md 应含
+        evidence 概念,提及具体 evidence 文件名 (runtime-evidence /
+        harness-evidence / cloud-evidence 之一)。v0.9 还应 cross-link 到
+        docs/evidence-guide.md。"""
         content = (self.exp / "materials" / "README.md").read_text(
             encoding="utf-8")
         # 含 evidence 概念
@@ -168,10 +176,10 @@ class TestCmdNewCopilot(unittest.TestCase):
                              "cloud-evidence")),
             "materials/README.md 应提及 runtime-evidence / "
             "harness-evidence / cloud-evidence 之一作为按需文件")
-        # 应说明 evidence 不默认强制 (产品约定 + Auto future)
-        self.assertTrue(
-            "不强制" in content or "按需" in content,
-            "materials/README.md 应说明 evidence 是按需 / 不强制")
+        # v0.9: cross-link 到 evidence-guide.md(不重复 evidence-guide 内容)
+        self.assertIn("evidence-guide", content,
+                      "v0.9 materials/README.md 应 cross-link 到 "
+                      "docs/evidence-guide.md")
 
     def test_stdout_mentions_setup_mode(self):
         self.assertIn("setup mode=copilot", self.stdout)

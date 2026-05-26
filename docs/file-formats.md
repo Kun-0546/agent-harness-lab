@@ -27,7 +27,10 @@
 
 ### Setup mode 产物 (`ahl new --mode <mode>`,见 [`product-walkthrough.md`](product-walkthrough.md) Step 4)
 
-- **copilot** (默认): `brief.md` + `materials/README.md` + `cases/` + `harnesses/`
+- **copilot** (默认): `brief.md` (12 节工作单) + `materials/README.md`
+  (8 节协作目录) + `cases/` + `harnesses/`。12/8 节具体填法 + coding
+  agent 操作规则在 [`copilot-setup.md`](copilot-setup.md);setup-state
+  示例在 [`../examples/copilot-setup-example/`](../examples/copilot-setup-example/)。
 - **manual**: `program.md` + `rubric.md` + `simulator.md` + `cases/` + `harnesses/`
 - **auto**: 当前 not implemented,不创建任何文件
 

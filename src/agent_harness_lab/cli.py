@@ -131,6 +131,8 @@ def cmd_new(args: argparse.Namespace) -> int:
         print("  - copilot (默认) —— AI 引导式实验配置", file=sys.stderr)
         print("  - manual         —— 你手动编辑完整骨架", file=sys.stderr)
         print("", file=sys.stderr)
+        print("推荐路径:--mode copilot (默认) —— 见 docs/copilot-setup.md",
+              file=sys.stderr)
         print("Auto 完整设计:docs/product-walkthrough.md Step 2 + Step 9",
               file=sys.stderr)
         return 2

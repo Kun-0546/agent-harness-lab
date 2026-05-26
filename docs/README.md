@@ -23,6 +23,10 @@ Step 锚点跳到对应那份。
 
 - **[`product-walkthrough.md`](product-walkthrough.md)** —— 9-step 产品流程
   (Step 1 Define goal → Step 9 Decide;Step 6.5 = probe)。
+- **[`copilot-setup.md`](copilot-setup.md)** —— Co-pilot setup mode 的驱动
+  指南(默认 mode):brief.md 12 节怎么填、coding agent 在 co-pilot 实验
+  里可改 / 不可改什么、什么时候跑哪个 `ahl` 命令。**Walkthrough Step 2 +
+  Step 4 之后接着读这份。**
 - **[`product-definition.md`](product-definition.md)** —— 产品定义 + 三层
   架构 + 术语表。
 - **[`file-formats.md`](file-formats.md)** —— 工具实际读写的文件格式
@@ -66,7 +70,11 @@ Step 锚点跳到对应那份。
 ## Reference examples
 
 - [`../examples/sample-workspace/`](../examples/sample-workspace/) —— 端到端
-  可跑的产品流 sample(v0.7 canonical)。
+  可跑的产品流 sample(v0.7 canonical,**runnable end-state**)。
+- [`../examples/copilot-setup-example/`](../examples/copilot-setup-example/)
+  —— co-pilot mode 在用户 + coding agent 协作完成 setup 后、**`ahl run` 之
+  前**长什么样的 setup-state 示例(v0.9 加)。不可跑;参考 brief.md 12 节
+  填法 + `expected-coding-agent-plan.md` 的 3-anchor 交付样式。
 - [`../examples/evidence-examples/`](../examples/evidence-examples/) —— 用户
   自填的 `materials/*-evidence.md` 模板(v0.8 加,3 份 runtime / harness /
   cloud)。复制到自己实验的 `materials/` 下据情况改。
@@ -87,7 +95,8 @@ Step 锚点跳到对应那份。
   不是 `ahl draft`。
 - **[`agent-authoring-guide.md`](agent-authoring-guide.md)** —— v2-minimal
   时代给外层 coding agent 的指南。已被 `product-walkthrough.md` +
-  `materials/README.md` 取代。
+  `materials/README.md` + v0.9 的 `copilot-setup.md` 取代 —— modern
+  co-pilot path 完整指南在 `copilot-setup.md` §5。
 - **[`design-v0.3.md`](design-v0.3.md)** —— v1 / HDL (Harness Design Loop)
   时代的架构。三层模型仍是 `product-definition.md` §2 的底,但 HDL / hdl
   命名是历史代号(当前是 Agent Harness Lab)。
@@ -101,6 +110,7 @@ Step 锚点跳到对应那份。
 ## 一句话
 
 - **首次接触** → `product-walkthrough.md` + `examples/sample-workspace/`
+- **驱动 co-pilot mode(默认 mode)** → `copilot-setup.md` + `examples/copilot-setup-example/`
 - **产品定位** → `product-definition.md`
 - **具体填什么文件** → `file-formats.md`
 - **解读 evidence(weak/medium/strong/unknown 各是什么)** → `evidence-guide.md`

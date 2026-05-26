@@ -1,6 +1,6 @@
 # Agent Harness Lab · 三种产品模式
 
-> **⚠ DEPRECATED / HISTORICAL (v0.3.1 起,2026-05-25 统一标注)**
+> **⚠ DEPRECATED / HISTORICAL (v0.3.1 起,2026-05-25 统一标注;v0.9 加 current-reference 指针)**
 >
 > 本文是 v0.2.0 时代的产品模式描述。**当前用户路径已被 [`product-walkthrough.md`](product-walkthrough.md) 取代**:
 > - **Step 2 setup mode** (`ahl new --mode copilot/manual/auto`) 代替本文 Manual / Co-pilot / Auto 的流程描述
@@ -8,6 +8,11 @@
 > - 当前 Manual 流程**不再要求 init 时创建 connect.md**(`ahl init` 只建 `goal.md` + `experiments/`)
 > - 当前 Co-pilot 主入口是 `ahl new --mode copilot`,**不是 `ahl draft`**
 > - 当前 `brief.md` 是 coding agent **工作单**(可改),**不再 human-owned**
+>
+> **Co-pilot mode 的当前驱动指南是
+> [`copilot-setup.md`](copilot-setup.md)**(v0.9, 2026-05-26 加)。该文档
+> 9 节给 human operator + coding agent 完整规则,**优先读那份**;本文只
+> 作历史 reference。
 >
 > 本文 **§3 authority matrix** 仍作为 **long-term architecture background** 保留,
 > 跟 [`design-v0.4.1.md`](design-v0.4.1.md) §3 一致。其余内容是 v0.2.0 时代的

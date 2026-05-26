@@ -1,12 +1,18 @@
 # Agent Authoring Guide
 
-> **⚠ DEPRECATED (v0.3.1 起,2026-05-25 统一标注)**
+> **⚠ DEPRECATED (v0.3.1 起,2026-05-25 统一标注;v0.9 加 superseded 指针)**
 >
 > 本文是 v0.2.0 / v2-minimal 时代的 coding agent 指南,**与 v0.3.1 当前主路径
 > 不一致**。已知冲突:本文把 `brief.md` 描述为 "human-owned, 你不要改",
 > 把 `ahl draft <name>` 列为入口——这两条都跟 v0.3.1 Step 2 后的实际行为冲突。
 >
+> **Superseded by [`copilot-setup.md`](copilot-setup.md) for the modern
+> co-pilot path** (v0.9, 2026-05-26)。该文档 §5 是给现代 coding agent
+> 的完整操作规则,优先读那份。
+>
 > **当前 coding agent 应读**:
+> - [`copilot-setup.md`](copilot-setup.md) §5 — co-pilot mode 现代操作规则
+>   (替代本文)
 > - [`product-walkthrough.md`](product-walkthrough.md) — 9 步产品流程
 >   (含 Step 2 setup mode = `ahl new --mode copilot` + Step 3 runtime boundary
 >   + evidence level)
