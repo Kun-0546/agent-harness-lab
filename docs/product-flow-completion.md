@@ -146,7 +146,7 @@ examples/sample-workspace/
     └── 001-faq-conciseness/
         ├── program.md                        # experiment spec (assumption + 声明)
         ├── rubric.md                         # 2 dimensions: correctness, conciseness
-        ├── simulator.md                      # minimal persona (single-turn fixture)
+        ├── simulator.md                      # minimal persona (stub_simulator drives 3-turn conversations: 1 opening + 2 fixed follow-ups)
         ├── harnesses/
         │   ├── V1.md                         # baseline, runtime_source=local-tiny, ## Patch with start_command
         │   └── V2.md                         # runtime_source=local-tiny, harness_package=concise-prompt@0.1.0
@@ -166,8 +166,13 @@ examples/sample-workspace/
 - `ahl score` uses `stub_grader` (no `--llm`) → score is a deterministic
   sha1 of `(dimension, agent_text)`. Different agent_text → different
   scores → V1 vs V2 compare delta is non-trivial and stable.
-- `stub_simulator` returns None after first turn → 1-turn conversations
-  → no simulator-side variance.
+- `stub_simulator` produces a fixed 3-turn conversation per case (case
+  opening + 2 hard-coded follow-ups from `_STUB_FOLLOWUPS` in
+  `src/agent_harness_lab/simulator.py`, then returns None) → no
+  simulator-side variance. The doc/grader properties of the sample
+  workspace do not depend on turn count; they depend on the fact that
+  each turn's `agent_text` is deterministic and that V1 vs V2's
+  `agent_text` differs because the package changed `prompts/system.md`.
 
 ### Reproducibility test
 
@@ -190,7 +195,7 @@ verifies this.
 | `examples/sample-workspace/harness-packages/concise-prompt/0.1.0/payload/system.md` | Concise prompt: `"STRICT - answer in minimal form"` |
 | `examples/sample-workspace/experiments/001-faq-conciseness/program.md` | Standard program template, filled |
 | `examples/sample-workspace/experiments/001-faq-conciseness/rubric.md` | 2 dimensions: correctness (0.5), conciseness (0.5) |
-| `examples/sample-workspace/experiments/001-faq-conciseness/simulator.md` | Single-turn fixture; stub simulator returns None after turn 0 (uses default behavior) |
+| `examples/sample-workspace/experiments/001-faq-conciseness/simulator.md` | Persona + strategy describe the intended `--llm` real-simulator behavior; doc explicitly notes that the default stub_simulator ignores these three sections and runs a fixed 3-turn conversation per case (1 opening + 2 hard-coded follow-ups) |
 | `examples/sample-workspace/experiments/001-faq-conciseness/harnesses/V1.md` | id=V1, 基线=是, runtime_source=local-tiny; ## Patch with `start_command: python agent.py` (no file overrides — uses runtime's default system.md) |
 | `examples/sample-workspace/experiments/001-faq-conciseness/harnesses/V2.md` | id=V2, 基线=否, runtime_source=local-tiny, harness_package=concise-prompt@0.1.0 (no ## Patch — manifest supplies start_command) |
 | `examples/sample-workspace/experiments/001-faq-conciseness/cases/C1.md` | id=C1, ## 起始输入 = "How do I reset my password?" |
