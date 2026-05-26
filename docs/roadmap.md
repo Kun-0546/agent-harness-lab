@@ -144,28 +144,54 @@ scoring / package / probe 合同、不发 PyPI、不公开仓、不发 announcem
 
 ---
 
-## v0.8 — Product Reliability / Co-pilot Productization [exploring]
+## v0.8 — Product Reliability & Evidence Hardening [shipped]
 
-**目标**:在 v0.7 完整产品流的基础上,补 product reliability 与原计划 v0.7
-未落地的 Co-pilot 入口打磨。具体方向待 v0.8 spec 决定。
+**目标**:在 v0.7 完整产品流可跑的基础上,补 (1) **evidence 链 user-facing
+解读**(让读 compare-*.md 的人知道 strong/medium/weak/unknown 各是什么、
+怎么升、自填 evidence 文件长什么样) + (2) **doc / sample / CLI drift 回归
+保护**(让后续 PR 不能默默改坏 docs ↔ code 链)。**docs + tests only,
+zero src behavior change,no new CLI command,no contract change**。
 
-**候选方向**(待选,见 `temp/v0.8.0-planning.md`):
+> 原 v0.7 时挂在 v0.8 entry 的"Co-pilot Setup Productization"方向 deferred
+> 到 v0.9 / v0.10 候选项;v0.8 spec lock-in 后路线调整为"Reliability &
+> Evidence Hardening" — 见 `docs/product-reliability-evidence-hardening.md`。
 
-- `ahl package inspect / validate` —— 让 harness package 离 install
-  之前能 read-only 检查 manifest / payload 完整度
-- probe ↔ snapshot 更紧的绑定(snapshot 引用最近一次成功 probe id)
-- evidence import 改进(`materials/*-evidence.md` 解析 + write-evidence
-  覆盖更多 source 类型)
-- product acceptance hardening(更多边界 case 的 E2E 覆盖、CI workflow
-  可选项)
-- 原 v0.7 计划的 Co-pilot ergonomics(`materials/README.md` 模板分场景、
-  `brief.md` 校验、coding agent 入口文档)
-- `ahl iterate <experiment>`(可推迟到 v0.9)
+**主要交付**:
 
-**关键依赖**:v0.7 Complete Product Flow MVP(已 shipped)。
+- `docs/evidence-guide.md`(centerpiece,~560 行,10 节)—— 5 个 evidence
+  artifact 类型解释、4 档 level 推断规则、`materials/*-evidence.md` 格式
+  说明、harness package 怎么影响 evidence、probe 跟 evidence 什么关系、
+  4 个 worked example、"AHL 不证明什么"诚实清单
+- `examples/evidence-examples/{README, runtime-evidence, harness-evidence,
+  cloud-evidence}.md` —— 用户自填模板,每份明确"checked / supplied by /
+  captured at / can support / cannot prove / limitations"六段;cloud-
+  evidence.md 显著 disclosure"not cloud attestation"
+- `docs/product-acceptance-checklist.md`(~260 行,12 组 A-L) —— 新装
+  AHL 跑 sample workspace、或 maintainer 准备 merge/tag/release 前的
+  自验收清单
+- `tests/test_doc_consistency.py`(10 测) —— 8 项 drift detector:docs
+  mainline 链接 / evidence-guide 被引用 / key spec 可达 / simulator.md
+  跟 stub_simulator 行为对齐(这条能 catch v0.7 PASS-WITH-DOC-BLOCKER)/
+  sample workspace 仓内 cleanliness / evidence-examples 完整 + 限制语言 /
+  current docs 无 dead link(skip `docs/archive/` + banner-tagged 历史
+  doc)
+- `tests/test_readme_command_flow.py`(4 测,scoped 到 README §8 + sample-
+  workspace recipe) —— README 命令 anchor + 实际 CLI 可跑
+- `docs/file-formats.md` 新 §Materials Evidence Files (v0.4) 段 + cross-
+  link 到 evidence-examples 和 evidence-guide
+- README.md / README_CN.md §7 + docs/README.md / docs/evidence-aware-
+  result.md cross-link 到新 evidence-guide
+- `docs/product-reliability-evidence-hardening.md` v0.8 spec(16 节)
 
-**显式不做**:public launch、PyPI、visibility flip — 公开发布作为 future
-option,不是 v0.8 默认轨。
+**测试**:465 → **479 passed**(+14:10 doc-consistency + 4 README
+command-flow)。strict ResourceWarning 模式也 479。
+
+**关键依赖**:v0.4 + v0.5 + v0.6 + v0.7(全部已 shipped);v0.8 不引入
+新依赖。
+
+**显式不做(redline 已确认)**:不加 CLI 命令、不加 src 模块、不变 snapshot
+schema、不变 v0.4 evidence 推断规则、不变 scoring / package / probe 合同、
+不发 PyPI、不公开仓、不发 announcement。
 
 ---
 
