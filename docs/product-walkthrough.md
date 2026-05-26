@@ -209,7 +209,15 @@ AHL 对每个 variant:
 2. **Compare report** —— 总分、每维度相对 V1 的 delta、回归维度(变差的维度)
 3. **Transcript + snapshot** —— 一段对话实际说了什么 + 跑的什么版本
 
-**怎么读**:先看 compare 总分找赢家 → 看每维度 delta 找回归点(这是 keep/discard 决策的核心) → 不确定的差异打开 transcript 看,不要只看分数。
+**v0.4 Evidence level** —— compare report 在版本总分之前新增 `## Evidence` section,
+据 runtime snapshot + 可选 `materials/*-evidence.md` 推断每个 variant 的 evidence
+level(strong / medium / weak / unknown)。weak/unknown 时报告顶部加 `⚠` 警告;
+strong/medium 混用时加 `ℹ` 提示 "evidence levels differ"。**不 block 决策,只让
+keep/discard 时心里有数**。完整契约见 `docs/evidence-aware-result.md`。
+
+**怎么读**:先看 compare 顶部 Evidence section 判断证据强度 → 看总分找赢家 →
+看每维度 delta 找回归点(这是 keep/discard 决策的核心) → 不确定的差异打开
+transcript 看,不要只看分数。
 
 ---
 

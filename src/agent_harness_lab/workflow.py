@@ -98,6 +98,7 @@ class CompareResult:
 
     report_text: str
     out_path: Path
+    evidence: dict | None = None   # v0.4:full evidence summary;cli 用来 surface warning/note
 
 
 @dataclass
@@ -370,12 +371,21 @@ def score(exp_dir: Path, use_llm: bool) -> ScoreResult:
     if not scores:
         raise WorkflowError("没有可打分的对话(run 结果全是错误?)")
 
+    # v0.4:read snapshot + materials/*-evidence.md → 推 evidence level,落 score JSON
+    from agent_harness_lab.evidence import (
+        _run_id_from_filename,
+        summarize_evidence_for_run,
+    )
+    evidence = summarize_evidence_for_run(
+        runs, _run_id_from_filename(run_file.name), exp_dir)
+
     out_path = results_dir / f"score-{time.strftime('%Y%m%d-%H%M%S')}.json"
     out_path.write_text(json.dumps({
         "run": run_file.name,
         "rubric": "rubric.md",
         "grader": grader_name,
         "scores": [s.__dict__ for s in scores],
+        "evidence": evidence,
     }, ensure_ascii=False, indent=2), encoding="utf-8")
 
     by_version: dict[str, list[float]] = {}
@@ -416,12 +426,21 @@ def compare(exp_dir: Path) -> CompareResult:
         raise WorkflowError("compare 跑不了:\n  - " + "\n  - ".join(bproblems))
     baseline_id = next((v.version_id for v in versions if v.is_baseline), "")
     comparison = compare_scores(scores, baseline_id, mode)
+
+    # v0.4:用 score JSON 自带 evidence;旧 v0.3.x score 没这字段时 on-the-fly 重算。
+    # 重算 best-effort:run 文件丢了 / snapshot 损坏 → unknown,不 crash。
+    evidence = data.get("evidence")
+    if evidence is None:
+        from agent_harness_lab.evidence import summarize_evidence_for_score
+        evidence = summarize_evidence_for_score(data, exp_dir)
+
     report_text = report.build_compare_report(
-        exp_dir.name, score_file.name, data.get("grader", "?"), baseline_id, comparison)
+        exp_dir.name, score_file.name, data.get("grader", "?"),
+        baseline_id, comparison, evidence)
 
     out_path = results_dir / f"compare-{time.strftime('%Y%m%d-%H%M%S')}.md"
     out_path.write_text(report_text + "\n", encoding="utf-8")
-    return CompareResult(report_text=report_text, out_path=out_path)
+    return CompareResult(report_text=report_text, out_path=out_path, evidence=evidence)
 
 
 def review(exp_dir: Path) -> ReviewResult:

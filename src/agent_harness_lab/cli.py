@@ -415,6 +415,14 @@ def cmd_compare(args: argparse.Namespace) -> int:
         return 1
     print(result.report_text)
     print(f"\n对比报告存到:{result.out_path}")
+    # v0.4:evidence 有 warning/note 时多打一行指向 report 顶部 Evidence 段。
+    # 退出码不变;不 block。spec docs/evidence-aware-result.md §5.2。
+    from agent_harness_lab.evidence import evidence_warning
+    signals = evidence_warning(result.evidence)
+    if signals["warning"]:
+        print(f"⚠ {signals['warning']} —— 见 report 顶部 Evidence 段")
+    elif signals["note"]:
+        print(f"ℹ {signals['note']} —— 见 report 顶部 Evidence 段")
     return 0
 
 
