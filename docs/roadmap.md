@@ -55,7 +55,7 @@ cleanup 收口到可公开发布的 baseline。
 
 ---
 
-## v0.5 — Harness Package MVP [planned]
+## v0.5 — Harness Package MVP [shipped]
 
 **目标**:让 harness variant 不只是实验目录里的文件,而是一个可安装、可 hash、
 可 snapshot 的 **runtime harness component**。Harness package 只装 harness
