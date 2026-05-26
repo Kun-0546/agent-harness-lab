@@ -79,6 +79,8 @@ pip install -e .
 
 This installs the `ahl` command. If your shell reports `ahl: command not found`, the script directory isn't on your PATH — add it, or run the tool as `python -m agent_harness_lab` (on Windows, `py -m agent_harness_lab`).
 
+> **Install platform note (as of v0.10):** the install path was verified on Windows during the v0.10 open-source readiness freeze. **Linux and macOS were not independently tested in v0.10.** AHL is stdlib-only Python 3.10+ and should install on either, but treat the first install on a non-Windows host as "verify, then report." See [`docs/public-launch-checklist.md`](docs/public-launch-checklist.md) Group C.
+
 ## Three product modes
 
 `ahl` exposes three setup modes (full flow in [`docs/product-walkthrough.md`](docs/product-walkthrough.md) Step 2):
@@ -97,7 +99,7 @@ This installs the `ahl` command. If your shell reports `ahl: command not found`,
 
 Honest status — each item names the version that would carry it:
 
-- **Auto mode** — agent-iterated harnesses with approval gates and budget rules. Needs calibration + approval gates first (M2+).
+- **Auto mode** — agent-iterated harnesses with approval gates and budget rules. **Deferred to v1.x / post-open-source.** Not next; not v0.10 (which is open-source readiness freeze); not part of the v1.0 public-stability baseline. Needs calibration + approval gates + escalation rules; none of those are designed yet.
 - **Cloud attestation** — proving what actually loaded inside a remote agent runtime. Currently cloud variants land at `weak` evidence unless you hand-write `materials/*-evidence.md`.
 - **Harness package registry / remote distribution** — packages are workspace-local only (v0.5). No `ahl package publish`, no fetch, no version resolver.
 - **Additional runtime source types** — `docker_image`, `remote_api`, `dev_agent` are spec'd but deferred to runtime-materialization M2+.

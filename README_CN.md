@@ -79,6 +79,8 @@ pip install -e .
 
 这会装上 `ahl` 命令。如果终端报 `ahl: command not found`,是脚本目录不在 PATH 上——把它加进 PATH,或者改用 `python -m agent_harness_lab` 来跑(Windows 上用 `py -m agent_harness_lab`)。
 
+> **安装平台说明(v0.10 时):** v0.10 open-source readiness freeze 期间在 Windows 上验证过安装路径。**Linux 与 macOS 在 v0.10 中没有单独测试**。AHL 是 stdlib-only Python 3.10+,理论上两个平台都装得上,但首次在非 Windows 主机上装时建议"先验证、再报告"。详见 [`docs/public-launch-checklist.md`](docs/public-launch-checklist.md) Group C。
+
 ## 三种产品模式
 
 `ahl` 暴露三种 setup mode(完整 flow 见 [`docs/product-walkthrough.md`](docs/product-walkthrough.md) Step 2):
@@ -97,7 +99,7 @@ pip install -e .
 
 老实说,每条标注承载它的版本:
 
-- **Auto mode** —— Agent 自迭代 harness,带审核门槛和 budget 规则。需要先有 calibration + approval gates(M2+)。
+- **Auto mode** —— Agent 自迭代 harness,带审核门槛和 budget 规则。**推到 v1.x / post-open-source。** 不是下一档;不是 v0.10(v0.10 是 open-source readiness freeze);不在 v1.0 公开稳定承诺基线里。还要先把 calibration + approval gates + escalation 规则设计出来,这些都没动。
 - **Cloud attestation** —— 证明远端 agent runtime 里实际装了什么。当前 cloud variant 默认 `weak` evidence,除非你手写 `materials/*-evidence.md`。
 - **Harness package 注册中心 / 远端分发** —— Package 当前只能 workspace 本地(v0.5)。没有 `ahl package publish`、没有 fetch、没有版本求解器。
 - **更多 runtime source 类型** —— `docker_image`、`remote_api`、`dev_agent` 已 spec,但 deferred 到 runtime-materialization M2+。
