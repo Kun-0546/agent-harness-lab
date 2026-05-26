@@ -65,6 +65,12 @@ intended version for this experiment:
   these are the agent's self-report, which the agent could in principle
   be misreporting.
 - Cryptographic chain of custody. Plain markdown + plaintext hashes.
+- This is **not cloud attestation** — the disclaimer scope is identical
+  to `cloud-evidence.md` even though this file targets local agents:
+  hand-authored attestation is honor-system metadata, not a verified
+  trust chain. If your harness lives in a cloud deployment, use
+  `cloud-evidence.md` instead (which is also not cloud attestation in
+  any cryptographic sense).
 
 ## Limitations
 

@@ -169,20 +169,31 @@ option,不是 v0.8 默认轨。
 
 ---
 
-## v0.9 — Auto Mode MVP [future]
+## v0.9 — Auto Mode MVP + 候选并入项 [exploring]
 
-**目标**:落地 `design-v0.4.1.md` 设计的 Auto mode 第一档 — coding agent 在
-budget + approval gate 约束下自主迭代 harness。
+**主线目标**:落地 `design-v0.4.1.md` 设计的 Auto mode 第一档 — coding agent
+在 budget + approval gate 约束下自主迭代 harness。
 
-**主要交付**:
+**主线候选交付**:
 
 - `ahl new --mode auto` 不再 not-implemented
 - approval gate schema (budget / max iterations / red line trigger)
 - calibration 子系统 MVP (judge / rubric 校准锚点)
 - escalation 规则:何时停 + 喊人
 
+**候选并入项**(deferred from v0.8 spec §15 lock — **不保证 v0.9 落地**,
+具体取舍待 v0.9 spec):
+
+- `ahl package inspect` / `ahl package validate`(read-only package
+  inspection + standalone preflight,v0.8 因 "no new CLI" redline 推迟)
+- 更紧的 probe ↔ snapshot 绑定(snapshot 引用最近一次成功 probe id,
+  v0.8 因 "no snapshot schema change" redline 推迟)
+
 **关键依赖**:v0.5 + v0.6 + v0.8 — Auto mode 需要 package / probe / iteration
-loop 都成熟。
+loop 都成熟;并入项需要 v0.8 reliability/evidence 工作落地。
+
+**显式不做**:public launch / PyPI / visibility flip 仍是独立 cycle,
+v0.9 默认不包含。
 
 ---
 

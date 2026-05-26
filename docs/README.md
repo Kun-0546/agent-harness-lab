@@ -52,8 +52,26 @@ Step 锚点跳到对应那份。
 - **[`product-flow-completion.md`](product-flow-completion.md)** —— v0.7
   product-flow MVP spec(sample workspace 设计 + README 概念重写 + docs
   导航 + E2E 验收)。本次 docs 重组的合同。
+- **[`product-reliability-evidence-hardening.md`](product-reliability-evidence-hardening.md)**
+  —— v0.8 spec(C1 已 ship:evidence-guide + 3 个 evidence 示例文件;
+  C2 已 ship:product-acceptance-checklist + 2 个 doc/CLI drift detector
+  测试模块)。
+- **[`product-acceptance-checklist.md`](product-acceptance-checklist.md)** ——
+  用户/reviewer-facing 验收清单。新装 AHL 跑 sample workspace、或
+  maintainer 准备 merge/tag/release 前,过一遍。**verify install +
+  pre-merge / pre-release checklist。**
 - **[`roadmap.md`](roadmap.md)** —— 从 v0.3.1 开源 baseline 到 v1.0
   stable 的版本演进路径。
+
+## Reference examples
+
+- [`../examples/sample-workspace/`](../examples/sample-workspace/) —— 端到端
+  可跑的产品流 sample(v0.7 canonical)。
+- [`../examples/evidence-examples/`](../examples/evidence-examples/) —— 用户
+  自填的 `materials/*-evidence.md` 模板(v0.8 加,3 份 runtime / harness /
+  cloud)。复制到自己实验的 `materials/` 下据情况改。
+- [`../examples/`](../examples/) —— 4 种 connect 方式的最小 agent(进程内库 /
+  外部命令行 / HTTP 无状态 / HTTP 有状态),各一份。
 
 ## Historical / Deprecated (背景,跳过即可)
 
@@ -86,6 +104,8 @@ Step 锚点跳到对应那份。
 - **产品定位** → `product-definition.md`
 - **具体填什么文件** → `file-formats.md`
 - **解读 evidence(weak/medium/strong/unknown 各是什么)** → `evidence-guide.md`
+- **自填 evidence 模板** → `examples/evidence-examples/`
+- **新装 / pre-merge / pre-release 验收** → `product-acceptance-checklist.md`
 - **某档 MVP 的深度** → `runtime-materialization.md` / `evidence-aware-result.md`
   / `harness-package-mvp.md` / `runtime-probe-mvp.md`
 - **版本路线** → `roadmap.md`
