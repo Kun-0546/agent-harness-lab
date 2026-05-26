@@ -82,7 +82,7 @@ cases / rubric / simulator —— 那些属于 experiment 不属于 harness。
 
 ---
 
-## v0.6 — Runtime Probe / Evidence Import [planned]
+## v0.6 — Runtime Probe / Evidence Import [shipped]
 
 **目标**:让 AHL 主动从 runtime 抓取 evidence,而不是依赖人手动写
 `materials/*-evidence.md`。
