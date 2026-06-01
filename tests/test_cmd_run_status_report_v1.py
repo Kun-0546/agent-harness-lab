@@ -45,12 +45,15 @@ class TestRun(unittest.TestCase):
             self.assertIn("no Agent Runtime was directly executed", out)
             self.assertIn("no evidence was collected yet", out)
 
-    def test_run_auto_exit_2(self):
-        with workspace_with_experiment(name="autox", run_mode="auto") as _ws:
-            rc, _out, err = _invoke(["run", "experiments/autox"])
-            self.assertEqual(rc, 2)
-            self.assertIn("Auto Mode", err)
-            self.assertIn("no run was executed", err)
+    def test_run_auto_executes_exit_0(self):
+        # Auto Mode is implemented: it runs (exit 0) and writes evidence. A fresh
+        # scaffold's runtime working_dirs don't exist, so it records connector_failure
+        # issues — but the run executed and issues.jsonl is written.
+        with workspace_with_experiment(name="autox", run_mode="auto") as ws:
+            rc, out, _err = _invoke(["run", "experiments/autox"])
+            self.assertEqual(rc, 0)
+            self.assertIn("Auto Mode", out)
+            self.assertTrue((ws / "experiments" / "autox" / "evidence" / "issues.jsonl").is_file())
 
     def test_run_blocked_on_review_error_exit_1(self):
         with workspace_with_experiment() as ws:

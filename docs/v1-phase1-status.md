@@ -23,18 +23,30 @@
   output states that agent-task.md was generated, that no Agent Runtime was
   directly executed, and that no evidence was collected yet. A review **ERROR**
   refuses generation (exit 1); `agent-task.md` is **not** the source of truth.
+- `hlab run experiments/<name>` **in Auto Mode = Auto Run** (`run.mode: auto`) —
+  reviews first, then the AutoRunner dispatches each case (single_turn `cases.jsonl`)
+  to each runtime via its connector (`local_cli` reuses the stdin_json IPC; `script`
+  runs a per-case command), and the EvidenceCollector writes `evidence/traces/`,
+  `evidence/raw/`, `evidence/artifacts/` (from `artifacts.collect` globs) and
+  `evidence/issues.jsonl` (connector_failure / case_failure / missing_artifact /
+  empty_output). **Exits 0** (the run executed; per-case problems are recorded as
+  issues, not exit codes). A review **ERROR** (e.g. Auto + manual) blocks it (exit 1).
+  This is **Auto Run only** — Auto Optimize is not implemented (see below).
 
 ## NOT implemented yet (later phases) — and how the CLI behaves now
 
-- `hlab run` **in Auto Mode** (`run.mode: auto`) — does **not** execute. It
-  validates, then prints to stderr that no run was executed, no evidence was
-  collected, no report was generated, and **exits 2**. (Blocked-by-validation
-  errors exit 1.)
+- **Auto Optimize** (the second Auto Mode layer) — NOT implemented. v1 validates the
+  `objective` / `optimization` schema + the editable/protected-surface boundary and
+  **WARNs** that the loop does not execute; it never generates, runs, evaluates, or
+  promotes Candidate Harnesses.
 - `hlab report` — does **not** generate a report. Prints to stderr that no
   report was generated and **exits 2**.
-- Not built: AutoRunner + connectors (`local_cli`, `script`), EvidenceStore /
-  IssueStore (writing `evidence/*` + `issues.jsonl`), EvaluationRunner,
-  ReportBuilder. (CopilotTaskRenderer / `agent-task.md` — **done**, see above.)
+- Not built: EvaluationRunner (run evaluators/tracks), Inspector (run
+  `inspection.issue_checks`), ReportBuilder (`report.md`/`report.html`), the Auto
+  Optimize loop / mutation engine, and Auto state policies beyond `isolated`
+  (reset/cumulative/snapshot_branch/replay). (AutoRunner = **Auto Run** +
+  `local_cli`/`script` connectors + EvidenceCollector + CopilotTaskRenderer — **done**.)
+- Authoritative v1 spec is version-controlled in **`docs/v1-spec/`**.
 
 ## Exit-code summary
 
@@ -45,5 +57,5 @@
 | `review` | 0 (PASS/WARN) | — | 1 (ERROR / not found) |
 | `status` | 0 | — | 1 (not found / unreadable) |
 | `run` (copilot) | 0 (agent-task.md generated) | — | 1 (review ERROR / not found) |
-| `run` (auto) | — | **2** | 1 (review ERROR / not found) |
+| `run` (auto) | 0 (cases dispatched, evidence written) | — | 1 (review ERROR / not found) |
 | `report` | — | **2** | 1 (review ERROR / not found) |

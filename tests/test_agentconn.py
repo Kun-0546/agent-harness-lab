@@ -162,10 +162,10 @@ class TestSessionTeardownReliability(unittest.TestCase):
         self.addCleanup(self._tmp.cleanup)
         self.sandbox = Path(self._tmp.name)
         # an agent that NEVER reads stdin and won't exit on EOF — the worst case.
-        # sleep is bounded (30s) so even a worst-case missed kill self-terminates
-        # well under any CI timeout; close() is expected to kill it in ~grace seconds.
+        # sleep is small (8s, still > close()'s grace so it tests the force-kill path)
+        # so even a worst-case missed kill self-terminates fast, far under any CI timeout.
         (self.sandbox / "agent.py").write_text(
-            "import time\ntime.sleep(30)\n", encoding="utf-8")
+            "import time\ntime.sleep(8)\n", encoding="utf-8")
 
     def _cmd(self):
         return f'"{sys.executable}" agent.py'

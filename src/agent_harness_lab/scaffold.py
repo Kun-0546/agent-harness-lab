@@ -229,6 +229,24 @@ inspection:
 reports:
   formats:
     - md
+
+# Auto Optimize (the second Auto Mode layer) — schema only; the loop is NOT
+# implemented yet. Uncomment + set optimization.enabled: true to declare it (review
+# will WARN that it does not execute). editable_surface must be harness-controlled;
+# goal / cases / evaluation / objective / conclusion are protected by default.
+# objective:
+#   primary_track: skill-artifact
+#   success_criteria: "<what counts as success>"
+#   optimize_for: maximize
+# optimization:
+#   enabled: false
+#   editable_surface:
+#     - harnesses/B/
+#   stop_conditions:
+#     - max_rounds: 5
+#   promotion_policy:
+#     promote_if_track: skill-artifact
+#     reject_if_issue: case_failure
 """
 
 AGENT_RUNTIME_TEMPLATE = """# Agent Runtime spec for "{runtime_id}".

@@ -179,16 +179,27 @@ def cmd_run(args: argparse.Namespace) -> int:
               f"(Claude Code / Codex / Cursor Agent), then `hlab status {args.experiment}`.")
         return 0
 
-    # Auto Mode (and any other run.mode): not implemented in this phase.
-    # Do NOT exit 0 (that would imply work happened). Exit 2 = not implemented.
+    if spec.run_mode == "auto":
+        # Auto Mode: AHL drives the runtimes via connectors and collects evidence.
+        if report.verdict == WARN:
+            _print_review(report)  # non-blocking, but surface for transparency
+        from agent_harness_lab import auto
+        res = auto.run_auto(exp_dir, spec)
+        print(f"Auto Mode (run.mode=auto, execution.mode={spec.execution_mode}):")
+        print(f"  - dispatched {res.dispatched} case run(s) "
+              f"({res.cases} case(s) × {res.runtimes} runtime(s))")
+        print(f"  - evidence written under: {res.evidence_dir}")
+        print(f"  - traces: {res.traces_written}  |  issues: {len(res.issues)}", end="")
+        counts = res.issue_counts()
+        print(f"  {counts}" if counts else "")
+        print("  - no report was generated (ReportBuilder is a later phase)")
+        return 0
+
+    # Any other run.mode is not executable in v1.
     print(f"run: {exp_dir}  (run.mode={spec.run_mode}, execution.mode={spec.execution_mode})",
           file=sys.stderr)
-    print("NOT IMPLEMENTED in this phase — nothing was executed:", file=sys.stderr)
-    print("  - no run was executed", file=sys.stderr)
-    print("  - no evidence was collected", file=sys.stderr)
-    print("  - no report was generated", file=sys.stderr)
-    print("  (Auto Mode runs connectors local_cli/script in a later phase; "
-          "experiment.yaml is valid and ready.)", file=sys.stderr)
+    print(f"NOT IMPLEMENTED: run.mode={spec.run_mode!r} is not executable "
+          f"(use copilot or auto).", file=sys.stderr)
     return 2
 
 

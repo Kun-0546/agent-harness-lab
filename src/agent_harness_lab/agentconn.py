@@ -66,6 +66,21 @@ def _reap(proc: "subprocess.Popen", pgid: "int | None" = None) -> None:
                     os.killpg(pgid, signal.SIGKILL)
                 except Exception:  # noqa: BLE001 — group gone / not permitted → fall back
                     proc.kill()
+            elif not _POSIX:
+                # Windows: kill the whole tree, not just the immediate child. A
+                # shell=True connector's real worker (e.g. python) is a grandchild
+                # of cmd.exe; proc.kill() alone would orphan it. taskkill /T reaps
+                # the tree. (No-op path on POSIX, which uses killpg above.)
+                try:
+                    subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                   timeout=5, check=False)
+                except Exception:  # noqa: BLE001
+                    pass
+                try:
+                    proc.kill()
+                except Exception:  # noqa: BLE001
+                    pass
             else:
                 proc.kill()
             try:

@@ -586,5 +586,65 @@ class TestSimulator(_Base):
         self.assertIn("simulator_roleplay_unimplemented", self._codes(WARN))
 
 
+class TestAutoOptimizeSchema(_Base):
+    """Auto Optimize objective/optimization schema + review boundary (loop NOT built)."""
+
+    _STOP = "  stop_conditions:\n    - max_rounds: 3\n"
+
+    def _with(self, extra):
+        self._write(_doc() + extra)
+
+    def test_optimization_parses(self):
+        self._with("optimization:\n  enabled: false\n  editable_surface:\n    - harnesses/B/\n")
+        spec = parse_experiment_yaml(self.y)
+        self.assertIsNotNone(spec.optimization)
+        self.assertFalse(spec.optimization.enabled)
+        self.assertEqual(spec.optimization.editable_surface, ["harnesses/B/"])
+
+    def test_editable_surface_protected_errors(self):
+        self._with("optimization:\n  enabled: true\n  editable_surface:\n    - cases/\n" + self._STOP)
+        self.assertIn("editable_surface_protected", self._codes(ERROR))
+
+    def test_editable_surface_must_be_harness(self):
+        self._with("optimization:\n  enabled: true\n  editable_surface:\n    - src/foo.py\n" + self._STOP)
+        self.assertIn("editable_surface_not_harness", self._codes(ERROR))
+
+    def test_enabled_requires_stop_conditions(self):
+        self._with("optimization:\n  enabled: true\n  editable_surface:\n    - harnesses/B/\n")
+        self.assertIn("missing_stop_conditions", self._codes(ERROR))
+
+    def test_enabled_warns_loop_unimplemented(self):
+        self._with("optimization:\n  enabled: true\n  editable_surface:\n    - harnesses/B/\n" + self._STOP)
+        w = self._codes(WARN)
+        self.assertIn("optimization_loop_unimplemented", w)
+        self.assertNotIn("missing_stop_conditions", self._codes(ERROR))
+
+    def test_promotion_policy_unknown_ref_errors(self):
+        self._with("optimization:\n  enabled: true\n  editable_surface:\n    - harnesses/B/\n" + self._STOP
+                   + "  promotion_policy:\n    promote_if_track: no-such-track\n")
+        self.assertIn("promotion_policy_unknown_ref", self._codes(ERROR))
+
+    def test_promotion_policy_known_issue_type_ok(self):
+        self._with("optimization:\n  enabled: true\n  editable_surface:\n    - harnesses/B/\n" + self._STOP
+                   + "  promotion_policy:\n    reject_if_issue: case_failure\n")
+        self.assertNotIn("promotion_policy_unknown_ref", self._codes(ERROR))
+
+    def test_objective_unknown_track_errors(self):
+        self._with("objective:\n  primary_track: no-such-track\n  optimize_for: maximize\n")
+        self.assertIn("objective_unknown_track", self._codes(ERROR))
+
+    def test_objective_known_track_ok(self):
+        doc = _doc().replace(
+            "evaluation:\n  root: evaluation/\n  methods:\n    - type: llm_judge",
+            "evaluation:\n  root: evaluation/\n  evaluators:\n    - id: a\n      method: benchmark\n"
+            "  tracks:\n    - id: t1\n      evaluators: [a]\n      evidence: [traces]")
+        self._write(doc + "objective:\n  primary_track: t1\n  optimize_for: maximize\n")
+        self.assertNotIn("objective_unknown_track", self._codes(ERROR))
+
+    def test_non_mapping_optimization_errors(self):
+        self._with("optimization: nope\n")
+        self.assertIn("bad_optimization_type", self._codes(ERROR))
+
+
 if __name__ == "__main__":
     unittest.main()

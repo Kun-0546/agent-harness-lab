@@ -217,13 +217,15 @@ class TestCopilotRun(unittest.TestCase):
             self.assertIn("## Simulator", body)
             self.assertIn("single_turn", body)  # scaffold default simulator
 
-    def test_auto_mode_does_not_generate_task(self):
+    def test_auto_mode_does_not_generate_agent_task(self):
+        # Auto Mode executes (exit 0) and must NOT generate agent-task.md (that is
+        # Copilot Mode's artifact).
         with workspace() as ws:
             _new("autox", mode="auto")
-            rc, _, err = _run(["run", "experiments/autox"])
-            self.assertEqual(rc, 2)  # Auto Mode not implemented this phase
+            rc, out, _ = _run(["run", "experiments/autox"])
+            self.assertEqual(rc, 0)
             self.assertFalse((ws / "experiments" / "autox" / "agent-task.md").exists())
-            self.assertIn("NOT IMPLEMENTED", err)
+            self.assertIn("Auto Mode", out)
 
 
 class TestRenderUnit(unittest.TestCase):

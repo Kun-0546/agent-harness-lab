@@ -37,6 +37,11 @@ EVIDENCE_TYPES = {
     "traces", "raw", "artifacts", "snapshots", "scores", "inspections", "issues",
 }
 SIMULATOR_TYPES = {"single_turn", "script", "role_play"}
+# Auto Optimize (schema/review only in this phase; the loop is NOT implemented):
+# surfaces Auto must never modify unless explicitly allowed. Keyed by the leading
+# path/name segment (goal.md→goal, cases/→cases, evaluation/→evaluation, etc.).
+PROTECTED_SURFACE_DEFAULTS = {"goal", "cases", "evaluation", "objective", "conclusion"}
+OPTIMIZE_FOR_VALUES = {"maximize", "minimize"}
 ISSUE_CHECKS = {
     "missing_artifact", "empty_output", "path_drift", "runtime_mismatch",
     "missing_trace", "missing_score", "case_failure", "connector_failure",
@@ -50,7 +55,7 @@ INSPECTION_REVIEW_KEYS = {"artifact_review", "skill_review", "memory_review", "c
 KNOWN_TOPLEVEL = {
     "id", "status", "goal_ref", "question", "run", "execution", "harnesses",
     "agent_runtimes", "cases", "evaluation", "collection", "inspection", "reports",
-    "simulator",
+    "simulator", "objective", "optimization",
 }
 
 _KEBAB_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*\Z")  # \Z not $ — reject a trailing newline
@@ -130,6 +135,30 @@ class SimulatorSpec:
 
 
 @dataclass
+class ObjectiveSpec:
+    """Auto Optimize objective (schema/review only; the loop is not implemented)."""
+    primary_track: str | None
+    success_criteria: str | None
+    optimize_for: str | None
+    raw: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class OptimizationSpec:
+    """Auto Optimize boundary (schema/review only; the loop is not implemented).
+
+    editable_surface = what a candidate harness may change (harness-controlled only).
+    protected_surface = what Auto must never change (goal/cases/evaluation/objective/
+    conclusion are protected by default)."""
+    enabled: bool
+    editable_surface: list[str] = field(default_factory=list)
+    protected_surface: list[str] = field(default_factory=list)
+    stop_conditions: list[Any] = field(default_factory=list)
+    promotion_policy: dict[str, Any] | None = None
+    raw: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
 class ExperimentSpec:
     path: Path
     id: str | None = None
@@ -148,6 +177,8 @@ class ExperimentSpec:
     evaluators: list[EvaluatorSpec] = field(default_factory=list)
     tracks: list[TrackSpec] = field(default_factory=list)
     simulator: SimulatorSpec | None = None
+    objective: ObjectiveSpec | None = None
+    optimization: OptimizationSpec | None = None
     collection: dict[str, Any] = field(default_factory=dict)
     inspection: dict[str, Any] = field(default_factory=dict)
     report_formats: list[str] = field(default_factory=list)
@@ -318,6 +349,30 @@ def parse_experiment_yaml(path: Path) -> ExperimentSpec:
         simulator = SimulatorSpec(type=_sim.get("type"), raw=_sim)
     elif _sim is not None:
         bad_entries.append("simulator")
+    # objective / optimization (Auto Optimize — schema/review only; loop NOT implemented)
+    _obj = data.get("objective")
+    objective = None
+    if isinstance(_obj, dict):
+        objective = ObjectiveSpec(
+            primary_track=_obj.get("primary_track"),
+            success_criteria=_obj.get("success_criteria"),
+            optimize_for=_obj.get("optimize_for"), raw=_obj)
+    elif _obj is not None:
+        bad_entries.append("objective")
+    _opt = data.get("optimization")
+    optimization = None
+    if isinstance(_opt, dict):
+        _es, _ps, _sc = _opt.get("editable_surface"), _opt.get("protected_surface"), _opt.get("stop_conditions")
+        optimization = OptimizationSpec(
+            enabled=(_opt.get("enabled") is True),
+            editable_surface=[x for x in _es if isinstance(x, str)] if isinstance(_es, list) else [],
+            protected_surface=[x for x in _ps if isinstance(x, str)] if isinstance(_ps, list) else [],
+            stop_conditions=(_sc if isinstance(_sc, list) else ([] if _sc is None else [_sc])),
+            promotion_policy=(_opt.get("promotion_policy")
+                              if isinstance(_opt.get("promotion_policy"), dict) else None),
+            raw=_opt)
+    elif _opt is not None:
+        bad_entries.append("optimization")
     cases_files = _list_field(cases, "files", "cases.files", malformed)
     report_formats = [str(x) for x in _list_field(reports, "formats", "reports.formats", malformed)]
 
@@ -339,6 +394,8 @@ def parse_experiment_yaml(path: Path) -> ExperimentSpec:
         evaluators=evaluators,
         tracks=tracks,
         simulator=simulator,
+        objective=objective,
+        optimization=optimization,
         collection=data.get("collection"),  # keep raw: a falsy non-mapping (false/0/[]) must be flagged
         inspection=data.get("inspection"),  # keep raw: a falsy non-mapping (false/0/[]) must be flagged, not coerced
         report_formats=report_formats,
@@ -446,6 +503,10 @@ def validate_spec(spec: ExperimentSpec, experiment_dir: Path) -> list[Problem]:
     if "simulator" in bad_entries:
         err("bad_simulator_type",
             "`simulator` in experiment.yaml must be a mapping with a `type:` key")
+    if "objective" in bad_entries:
+        err("bad_objective_type", "`objective` in experiment.yaml must be a mapping")
+    if "optimization" in bad_entries:
+        err("bad_optimization_type", "`optimization` in experiment.yaml must be a mapping")
 
     # unknown top-level keys (consistency with collection/inspection: warn, don't ignore)
     if isinstance(spec.raw, dict):
@@ -482,6 +543,11 @@ def validate_spec(spec: ExperimentSpec, experiment_dir: Path) -> list[Problem]:
             _warn_unknown(_tr, {"id", "question", "evaluators", "evidence"}, f"evaluation.tracks[{_i}]")
     _warn_unknown(_raw.get("simulator"),
                   {"type", "script", "actor", "max_turns", "policy"}, "simulator")
+    _warn_unknown(_raw.get("objective"),
+                  {"primary_track", "success_criteria", "optimize_for"}, "objective")
+    _warn_unknown(_raw.get("optimization"),
+                  {"enabled", "editable_surface", "protected_surface", "stop_conditions",
+                   "promotion_policy"}, "optimization")
 
     # required scalar fields — must be strings. YAML implicit typing means an
     # unquoted 007 / 0x1f / yes / no parses to int/bool, so type-check explicitly.
@@ -586,7 +652,6 @@ def validate_spec(spec: ExperimentSpec, experiment_dir: Path) -> list[Problem]:
         err("missing_agent_runtimes",
             "add at least one entry under `agent_runtimes:` in experiment.yaml (id/harness/spec)")
     harness_ids = {h.id for h in spec.harnesses if h.id}
-    _any_runtime_artifacts = False
     for r in spec.agent_runtimes:
         if not r.id or not r.spec or not r.harness:
             err("bad_agent_runtime",
@@ -677,19 +742,13 @@ def validate_spec(spec: ExperimentSpec, experiment_dir: Path) -> list[Problem]:
                              f"agent runtime {r.id}: artifact {_aid!r} declares source/target — "
                              f"these are not v1 concepts; declare only id/kind/glob/required "
                              f"(EvidenceCollector decides the evidence/artifacts/ path)")
-                    if _arts_block.get("collect"):
-                        _any_runtime_artifacts = True
                 _adups = sorted({x for x in _aids if _aids.count(x) > 1})
                 if _adups:
                     err("duplicate_artifact_id",
                         f"agent runtime {r.id}: duplicate artifact id(s) {_adups}; "
                         f"each artifact needs a unique id within the runtime")
-
-    if _any_runtime_artifacts and spec.run_mode == "auto":
-        warn("artifact_harvest_unimplemented",
-             "artifacts.collect is declared and run.mode=auto, but artifact harvesting "
-             "runs via the EvidenceCollector, which is not implemented in this phase; "
-             "no artifacts will be harvested yet")
+        # (artifact harvesting now runs in Auto Mode via the EvidenceCollector, so the
+        # previous "harvest unimplemented" WARN is gone — it would be false.)
 
     _r_ids = [r.id for r in spec.agent_runtimes if isinstance(r.id, str)]
     _r_dups = sorted({x for x in _r_ids if _r_ids.count(x) > 1})
@@ -759,6 +818,50 @@ def validate_spec(spec: ExperimentSpec, experiment_dir: Path) -> list[Problem]:
                 warn("simulator_roleplay_unimplemented",
                      "simulator type=role_play is not executable by Auto Mode v1 "
                      "(Copilot/stretch); it will not be auto-run")
+
+    # --- Auto Optimize (objective + optimization): schema/review only; loop NOT built ---
+    _track_ids = {t.id for t in spec.tracks if isinstance(t.id, str)}
+    if isinstance(spec.objective, ObjectiveSpec):
+        pt = spec.objective.primary_track
+        if isinstance(pt, str) and pt and pt not in _track_ids:
+            err("objective_unknown_track",
+                f"`objective.primary_track` {pt!r} is not a defined evaluation track; "
+                f"define it under `evaluation.tracks`")
+        of = spec.objective.optimize_for
+        if isinstance(of, str) and of and of not in OPTIMIZE_FOR_VALUES:
+            warn("objective_optimize_for_unknown",
+                 f"`objective.optimize_for` {of!r} is not one of {sorted(OPTIMIZE_FOR_VALUES)}")
+    if isinstance(spec.optimization, OptimizationSpec):
+        opt = spec.optimization
+        # editable_surface: harness-controlled only, and never the protected surface.
+        for e in opt.editable_surface:
+            head = e.replace("\\", "/").split("/")[0].split(".")[0]
+            if head in PROTECTED_SURFACE_DEFAULTS:
+                err("editable_surface_protected",
+                    f"`optimization.editable_surface` entry '{e}' targets a protected surface "
+                    f"({head}); Auto must not modify goal / cases / evaluation / objective / conclusion")
+            elif not e.replace("\\", "/").startswith("harnesses/"):
+                err("editable_surface_not_harness",
+                    f"`optimization.editable_surface` entry '{e}' must be harness-controlled "
+                    f"(under harnesses/)")
+        # stop_conditions required when optimization is enabled
+        if opt.enabled and not opt.stop_conditions:
+            err("missing_stop_conditions",
+                "`optimization.enabled: true` requires `optimization.stop_conditions`")
+        # promotion_policy must reference known evaluation tracks or issue types
+        if isinstance(opt.promotion_policy, dict):
+            _known_refs = _track_ids | ISSUE_CHECKS
+            for k, v in opt.promotion_policy.items():
+                for ref in (v if isinstance(v, list) else [v]):
+                    if isinstance(ref, str) and ref and ref not in _known_refs:
+                        err("promotion_policy_unknown_ref",
+                            f"`optimization.promotion_policy.{k}` references {ref!r}, which is not a "
+                            f"known evaluation track or issue type")
+        # honest: the optimize loop is not implemented, so enabling it executes nothing
+        if opt.enabled:
+            warn("optimization_loop_unimplemented",
+                 "`optimization.enabled: true` but the Auto Optimize loop is not implemented in this "
+                 "phase — no candidate harnesses are generated, run, evaluated, or promoted yet")
 
     # cases
     raw_cases = _raw.get("cases")
