@@ -1,0 +1,8 @@
+id: runtime-a
+connector:
+  type: local_cli
+  # `python3` must be on PATH; on Windows without python3 use `py agent.py` / `python agent.py`.
+  # During Auto Optimize the working_dir is overridden per iteration to the candidate copy.
+  command: python3 agent.py
+  working_dir: ./harnesses/base
+  timeout: 30

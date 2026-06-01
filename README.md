@@ -1,131 +1,160 @@
 # Agent Harness Lab
 
-English | [中文](README_CN.md)
+English | [中文](README.zh-CN.md)
 
-> ⚠️ **v1 migration in progress.** This README still describes the retired
-> v0.10 `ahl` command surface. The current v1 CLI is **`hlab`** (commands:
-> `init / new / review / run / status / report`). For what is implemented today,
-> see [`docs/v1-phase1-status.md`](docs/v1-phase1-status.md),
-> [`docs/v1-concept-inventory.md`](docs/v1-concept-inventory.md), and the
-> migration plan [`docs/migration-from-v0.10.0-to-v1.md`](docs/migration-from-v0.10.0-to-v1.md).
-> This README will be rewritten in a later phase.
+A workbench for designing, running, and evaluating **agent harness experiments**. A
+*harness* is everything that wraps an agent runtime and shapes its behavior — the
+prompt, the tool configuration, the memory rules, the workflow. Change a harness, run
+it over a fixed set of cases against a real Agent Runtime, and collect reproducible
+evidence of whether the change helped.
 
-> A workbench for humans and coding agents to design, test, and improve the **runtime harnesses** that shape agent behavior.
+> **Status: v1, pre-release (`1.0.0.dev0`).** The sections below state what is
+> implemented today and what is not. This draft prioritizes accuracy over polish —
+> the product narrative will be developed further, but the README will never claim
+> more than the code does.
 
-Change a harness — a prompt, a tool config, a memory rule, a workflow — then measure whether the change made the agent better, worse, or no different. `ahl` runs experiments: you describe a goal, a set of harness variants, a set of test cases, and a rubric; the tool drives each variant through the cases, scores the conversations, and lays the variants side by side so you can see what the change did.
+## What AHL is
 
-## 1. What is Agent Harness Lab?
+An experiment is one `experiment.yaml`: a goal, one or more harnesses, a set of cases,
+an evaluation, and (optionally) an optimization objective. AHL runs each harness
+through the cases against a real runtime, writes an auditable evidence tree (traces,
+raw output, artifacts, scores, issues), runs inspection and evaluation, and builds a
+report.
 
-A CLI-driven workbench for **comparing harness variants of an agent on the same cases, with reproducible evidence**. You point AHL at an agent runtime, hand it 2–3 variants of the harness you want to test, hand it a small set of cases and a scoring rubric, and it produces a side-by-side compare report with snapshots that capture exactly what ran.
+The first-class object is the **harness**, not the agent. AHL is not a universal
+agent framework — it drives runtimes you already have through a small, explicit
+connector contract, and keeps the focus on the structure that wraps the agent.
 
-It is Python 3.10+, stdlib-only (zero external dependencies), and runs locally. The full [`docs/product-definition.md`](docs/product-definition.md) frames the three layers (Harness / Experiment / Loop) and the core objects.
+## Why it is not just an eval runner
 
-## 2. What problem does it solve?
+A plain eval runner scores model outputs. AHL is built around three things an eval
+runner usually isn't:
 
-I'm an AI Product Manager. My day job is designing memory, skill, and harness features for AI agents — features where you can't write a PRD on Monday and ship it Friday, because the design surface is in flight and the right answer is unknown when you start.
+- **The harness is the unit of change.** The structure is goal → harnesses → cases →
+  evaluation → (optional) optimization. Experiments compare harnesses (and, in the
+  optimization loop, an Incumbent against a Candidate) — not just models.
+- **Evidence discipline.** Every run persists a structured evidence tree and an
+  `issues.jsonl`; inspection and evaluation are separate, explicit steps. A pending or
+  unrun step is reported as pending — never fabricated into a conclusion.
+- **A bounded optimization loop.** AHL can run a candidate → evaluate → promote loop
+  over the harness within a protected/editable surface — see the honest scope below.
 
-For months I ran the same loop on my own work: define a goal, build a change, run experiments, look at the data, refine the goal, repeat. The pattern was consistent enough to treat as an architecture, not a workflow. `ahl` is that loop, extracted into a tool — but with a sharper claim than "evaluate agents": the first-class object is the **harness** that wraps the agent, not the agent itself.
+This grew out of one workflow. The author is an AI product manager designing memory,
+skill, and harness features for agents — features where you cannot write a PRD on
+Monday and ship it Friday, because the design surface is in flight and the right
+answer is unknown when you start. The loop (define a goal, change the harness, run
+experiments, read the evidence, refine the goal, repeat) was consistent enough to
+treat as an architecture. AHL is that loop, extracted into a tool.
 
-## 3. What is a runtime?
+## Modes
 
-The agent's execution environment — the source code, prompts, tools, configs, and start command that, when run, produce agent behavior. In AHL, you declare runtime sources in `runtime-sources.md` (workspace root). Two source types are supported in v0.3.0:
+### Copilot Mode (`run.mode: copilot`)
 
-- **`local_path`** — a directory on your machine. AHL copies it into a per-variant sandbox and applies the variant's patch.
-- **`git_repo`** — clone + checkout a specific ref + apply patch.
+AHL prepares the experiment and renders an `agent-task.md`; an external coding agent
+(Claude Code / Codex / Cursor) executes the runtime-specific steps and writes
+evidence, which AHL then validates, inspects, evaluates, and reports. AHL provides the
+structure, the checks, and the evidence discipline — not the execution.
 
-The materialization pipeline is `materialize → snapshot → start`, and every run persists a `RuntimeSnapshot` (source dir hash, patch hash, commit SHA) so a run is reproducible months later. Depth detail: [`docs/runtime-materialization.md`](docs/runtime-materialization.md).
+### Auto Mode (`run.mode: auto`)
 
-## 4. What is a harness?
+AHL drives the runtime itself through a connector and collects evidence. Auto Mode has
+two layers:
 
-The **external structure that shapes agent behavior without changing the model weights** — prompts, tool configs, memory rules, workflow steps, start command, env. A harness variant is one specific configuration of that structure. AHL's first-class object.
+- **Auto Run** — dispatch each case to the runtime through a connector, collect
+  evidence, inspect it, and evaluate it. Implemented.
+- **Auto Optimize** — a **bounded, deterministic** candidate → evaluate → promote loop
+  over the harness: copy the incumbent to a candidate, optionally mutate it via a user
+  `mutation_script`, enforce the editable/protected-surface boundary (a touched
+  protected file is rolled back), run + inspect + evaluate the candidate, then promote
+  or reject it by the promotion policy, stopping on `stop_conditions`. Candidate
+  generation is copy-only or your own deterministic script. **Not implemented:**
+  LLM-based mutation, fully autonomous optimization, remote/distributed optimization,
+  and any general self-improvement engine.
 
-You write one variant per file at `experiments/<id>/harnesses/V*.md`. By convention `V1` is the baseline; `V2+` are the changes you want to test. A variant declares `runtime_source:` (which runtime it patches) and an optional `## Patch` section (files / env / start_command overrides). Format: [`docs/file-formats.md`](docs/file-formats.md) §Harness Variant.
+## What is implemented (and what is not)
 
-## 5. What is a harness package?
+| Area | Implemented in v1 | Not implemented |
+|------|-------------------|-----------------|
+| Run modes | Copilot, Auto | — |
+| Auto layers | Auto Run; **bounded/deterministic** Auto Optimize (copy-only + `mutation_script`) | LLM-based mutation; fully autonomous, remote/distributed optimization; general self-improvement engine |
+| Connectors | `local_cli`, `script` | `remote_devbox`, `api`, `bridge`, `manual` — declarable but **not executed** (rejected by review) |
+| Evaluation | `benchmark` (runs a deterministic script) | — |
+| Evaluation (honest stubs) | `human_annotation` (ingests an annotation file if present, else **pending**); `llm_judge` (**offline stub → always pending**; no model is called) | real LLM-based judging |
+| State policies | `isolated`, `reset` (executed) | `cumulative`, `snapshot_branch`, `replay` — declarable → WARN, not executed |
+| Output | evidence tree (traces / raw / artifacts / scores / inspections / issues), `reports/report.md` | — |
 
-A **reusable, versioned, installable harness component** at workspace root: `harness-packages/<id>/<version>/{manifest.md, payload/...}`. A variant opts in with frontmatter `harness_package: <id>@<version>`, and AHL installs the package's payload into the variant's sandbox before applying the variant's patch.
+If a step is pending or unrun, AHL says so in `review`, `status`, and the report.
 
-Install order is fixed: **runtime materialize → package install → variant `## Patch` → snapshot**. Variant patch wins on file/env/start_command conflicts. The snapshot records the package's `manifest_hash`, `payload_hash`, and `effective_harness_hash` — three fingerprints that together prove which package version actually ran. Depth detail: [`docs/harness-package-mvp.md`](docs/harness-package-mvp.md).
-
-## 6. What is probe?
-
-A **read-only pre-run inspection** of every variant: `ahl probe <experiment>`. Checks `runtime_source` is accessible, the harness package (if any) is complete, the start command is supplied, and optionally runs a user-supplied smoke command (`--command "<cmd>"`, default 30s timeout). It never creates a sandbox, never installs anything, and never mutates source.
-
-Probe-results land at `experiments/<id>/probe-results/<probe_id>/<variant_id>.json`. Probe failure is **advisory** (any variant `fail` → exit 1) — it does not block `ahl run`. Depth detail: [`docs/runtime-probe-mvp.md`](docs/runtime-probe-mvp.md).
-
-## 7. What is evidence?
-
-A four-level label on every variant's score (`strong` / `medium` / `weak` / `unknown`) inferred from the runtime snapshot plus optional `materials/*-evidence.md` files. `strong` means AHL materialized the runtime itself and (if the variant uses a package) fingerprinted it completely. `weak` / `unknown` means AHL couldn't prove what actually ran — typically a legacy `connect.md` adapter or a cloud agent without supplied attestation.
-
-Evidence shows up at the **top of the compare report** as a `## Evidence` section. The point is not to block decisions — it's to let you make `keep / discard / next` calls with eyes open on how much you can trust the numbers. User guide: [`docs/evidence-guide.md`](docs/evidence-guide.md) (when to trust each level, how to upgrade weak → medium, why supplied evidence is not cloud attestation). Implementation contract: [`docs/evidence-aware-result.md`](docs/evidence-aware-result.md).
-
-## 8. Simplest end-to-end workflow
-
-The sample workspace at [`examples/sample-workspace/`](examples/sample-workspace/) is pre-initted, fully local, fully offline, zero API keys, and uses a deterministic 30-line tiny agent. From the repo root:
+## Quickstart
 
 ```bash
-cd examples/sample-workspace
-ahl probe 001            # readiness check (read-only)
-ahl run 001              # 2 variants × 2 cases = 4 conversations
-ahl score 001            # stub_grader → score-*.json with evidence block
-ahl compare 001          # compare-*.md with ## Evidence + version totals
+pip install -e .          # provides `hlab` (and `python -m agent_harness_lab`)
 ```
 
-V2 uses the `concise-prompt@0.1.0` package; V1 does not. The compare report shows the package made a measurable, reproducible behavior delta. See [`examples/sample-workspace/README.md`](examples/sample-workspace/README.md) for the full recipe and what to expect.
+Run a shipped example end to end — local, deterministic, no network, no API keys:
 
-For your own work: `ahl init` → fill `goal.md` → `ahl walkthrough` (prints the 9-step product flow) → declare runtime in `runtime-sources.md` (recommended) or `connect.md` (legacy) → `ahl new <name>` → run / score / compare. The 9 steps are documented in [`docs/product-walkthrough.md`](docs/product-walkthrough.md).
-
-## Install
-
-Requires Python 3.10+.
-
+```bash
+cd examples/auto-run-local-cli-lite
+PYTHONPATH=../../src python -m agent_harness_lab review experiments/demo
+PYTHONPATH=../../src python -m agent_harness_lab run    experiments/demo
+PYTHONPATH=../../src python -m agent_harness_lab report experiments/demo
 ```
+
+Full walk-through, including the Auto Optimize example:
+[`docs/quickstart.md`](docs/quickstart.md). Both examples: [`examples/`](examples/).
+
+## Command surface
+
+```text
+hlab init <dir>            initialize a workspace (goal.md, evaluation-methods/, experiments/)
+hlab new <name>            scaffold an experiment (--mode copilot|auto, --execution ab|sequential|...)
+hlab review <experiment>   validate experiment.yaml before running (PASS / WARN / ERROR)
+hlab run <experiment>      Copilot: render agent-task.md · Auto: run + collect + inspect + evaluate
+hlab status <experiment>   show status + evidence / evaluation state
+hlab report <experiment>   build reports/report.md from the evidence
+```
+
+`hlab <cmd>` and `python -m agent_harness_lab <cmd>` are equivalent. `ahl` remains as a
+legacy redirect that points you at `hlab`.
+
+## Specification
+
+The authoritative v1 contracts live in [`docs/v1-spec/`](docs/v1-spec/):
+
+- [`product-definition.md`](docs/v1-spec/product-definition.md) — what AHL is and its core objects
+- [`experiment-structure.md`](docs/v1-spec/experiment-structure.md) — the on-disk layout
+- [`experiment-yaml-schema.md`](docs/v1-spec/experiment-yaml-schema.md) — every `experiment.yaml` field
+- [`execution-model.md`](docs/v1-spec/execution-model.md) — modes, connectors, state policies, Auto Optimize
+- [`cli.md`](docs/v1-spec/cli.md) — the command surface
+
+## Requirements
+
+Python 3.10+ and a single dependency, **PyYAML**. Runs locally; the core workflow and
+the shipped examples need no network.
+
+```bash
 git clone https://github.com/Kun-0546/agent-harness-lab.git
 cd agent-harness-lab
 pip install -e .
 ```
 
-This installs the `ahl` command. If your shell reports `ahl: command not found`, the script directory isn't on your PATH — add it, or run the tool as `python -m agent_harness_lab` (on Windows, `py -m agent_harness_lab`).
+If your shell reports `hlab: command not found`, the script directory isn't on your
+PATH — add it, or run `python -m agent_harness_lab` (`py -m agent_harness_lab` on
+Windows).
 
-> **Install platform note (as of v0.10):** the install path was verified on Windows during the v0.10 open-source readiness freeze. **Linux and macOS were not independently tested in v0.10.** AHL is stdlib-only Python 3.10+ and should install on either, but treat the first install on a non-Windows host as "verify, then report." See [`docs/public-launch-checklist.md`](docs/public-launch-checklist.md) Group C.
+## Related work
 
-## Three product modes
-
-`ahl` exposes three setup modes (full flow in [`docs/product-walkthrough.md`](docs/product-walkthrough.md) Step 2):
-
-- **Manual** — you design harness variants and the experiment; `ahl` validates, runs, scores, compares. **Shipped.**
-- **Co-pilot** *(default)* — an external coding agent (Claude Code / Cursor / Codex) collaborates with you through conversation to maintain `brief.md` and `materials/`, and to generate or complete the experiment files. **Shipped.** Driving guide: [`docs/copilot-setup.md`](docs/copilot-setup.md); setup-state reference: [`examples/copilot-setup-example/`](examples/copilot-setup-example/).
-- **Auto** — agents iterate harnesses inside rules, budgets, and approval gates; escalate to you on anomalies. **Future mode** (depends on calibration + approval gates, M2+).
-
-## Commands
-
-14 commands: `init` · `walkthrough` · `connect` · `new` · `show` · `cases` · `rubric` · `simulator` · `harnesses` · `run` · `score` · `compare` · `review` · `probe`. Run `ahl --help` or `ahl <command> --help` for details.
-
-`run` and `score` default to built-in stubs (a canned simulator and a hash-based grader) — enough to smoke-test the pipeline, not to produce real results. For real runs, pass `--llm` and set the model env vars (`AHL_SIM_*` for the simulator, `AHL_JUDGE_*` for the grader). `examples/` ships a minimal agent for each of the four connection types (in-process library, external CLI, HTTP stateless, HTTP stateful), each with its protocol documented.
-
-## 9. What is NOT implemented yet
-
-Honest status — each item names the version that would carry it:
-
-- **Auto mode** — agent-iterated harnesses with approval gates and budget rules. **Deferred to v1.x / post-open-source.** Not next; not v0.10 (which is open-source readiness freeze); not part of the v1.0 public-stability baseline. Needs calibration + approval gates + escalation rules; none of those are designed yet.
-- **Cloud attestation** — proving what actually loaded inside a remote agent runtime. Currently cloud variants land at `weak` evidence unless you hand-write `materials/*-evidence.md`.
-- **Harness package registry / remote distribution** — packages are workspace-local only (v0.5). No `ahl package publish`, no fetch, no version resolver.
-- **Additional runtime source types** — `docker_image`, `remote_api`, `dev_agent` are spec'd but deferred to runtime-materialization M2+.
-- **`depends_on`** — seeding a case from a prior case's transcript is parsed and displayed but not consumed by `run` yet.
-- **Replay / scripted conversation modes** — only the simulated mode is implemented.
-- **Noise / trial / multi-run statistics** — every run is a single trial today.
-- **Polished public case study** — no published worked example yet; treat AHL as an architecture being proposed.
-
-## History
-
-This project began as **HDL / Harness Design Loop**. It is now renamed to **Agent Harness Lab** to make explicit what the first-class object actually is. HDL remains as a historical codename in commit history, old branches, and the v1 design docs (`docs/design-v0.3.md` / `docs/design-v0.4.1.md`).
-
-## Related Work
-
-**Heuristic Learning** — Jiayi Weng, *Learning Beyond Gradients* (2026): a coding agent improves a software system by editing code — rules, state, tests, memory — rather than training neural-network parameters. `ahl` is a tool for running that kind of loop.
-
-**Karpathy's AutoResearch** (2026) demonstrated an automated research loop on ML training against a fixed objective. `ahl` addresses an adjacent problem — AI *product* research, where the goal itself is under revision. A reference, not a template.
+- **Heuristic Learning** — Jiayi Weng, *Learning Beyond Gradients* (2026): a coding
+  agent improves a software system by editing code — rules, state, tests, memory —
+  rather than training network parameters. AHL is a tool for running that kind of loop.
+- **Karpathy's AutoResearch** (2026) demonstrated an automated research loop on ML
+  training against a fixed objective. AHL addresses an adjacent problem — AI *product*
+  research, where the goal itself is under revision. A reference, not a template.
 
 ## Author
 
 Built by Kun, an AI Product Manager.
+
+## License
+
+MIT.

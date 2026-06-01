@@ -136,7 +136,7 @@ class SimulatorSpec:
 
 @dataclass
 class ObjectiveSpec:
-    """Auto Optimize objective (schema/review only; the loop is not implemented)."""
+    """Auto Optimize objective: which evaluation track the bounded loop optimizes."""
     primary_track: str | None
     success_criteria: str | None
     optimize_for: str | None
@@ -145,7 +145,7 @@ class ObjectiveSpec:
 
 @dataclass
 class OptimizationSpec:
-    """Auto Optimize boundary (schema/review only; the loop is not implemented).
+    """Auto Optimize boundary for the bounded, deterministic loop.
 
     editable_surface = what a candidate harness may change (harness-controlled only).
     protected_surface = what Auto must never change (goal/cases/evaluation/objective/
@@ -855,11 +855,15 @@ def validate_spec(spec: ExperimentSpec, experiment_dir: Path) -> list[Problem]:
                         err("promotion_policy_unknown_ref",
                             f"`optimization.promotion_policy.{k}` references {ref!r}, which is not a "
                             f"known evaluation track or issue type")
-        # honest: the optimize loop is not implemented, so enabling it executes nothing
+        # accurate boundary: the BOUNDED, deterministic loop is implemented (copy-only
+        # or a user mutation_script); LLM-driven / autonomous optimization is NOT.
         if opt.enabled:
-            warn("optimization_loop_unimplemented",
-                 "`optimization.enabled: true` but the Auto Optimize loop is not implemented in this "
-                 "phase — no candidate harnesses are generated, run, evaluated, or promoted yet")
+            warn("optimization_bounded_only",
+                 "`optimization.enabled: true` runs the bounded, deterministic Auto Optimize loop "
+                 "(copy-only or a user `mutation_script`): it generates, runs, evaluates, and "
+                 "promotes candidate harnesses within stop_conditions, writing "
+                 "optimization/history.jsonl. It does NOT perform LLM-driven or autonomous "
+                 "optimization.")
 
     # cases
     raw_cases = _raw.get("cases")

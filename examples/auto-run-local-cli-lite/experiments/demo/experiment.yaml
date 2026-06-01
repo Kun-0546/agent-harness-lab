@@ -1,0 +1,46 @@
+# Auto Run example — one local_cli harness, two cases.
+# Run it:  hlab review experiments/demo  →  hlab run experiments/demo  →  hlab report experiments/demo
+# (see ../../README.md for the exact module-form commands)
+id: demo
+status: draft
+goal_ref: ../../goal.md
+question: "Does the base harness echo each case and leave its produced/ artifact?"
+run:
+  mode: auto
+execution:
+  mode: ab
+  state_policy: isolated
+harnesses:
+  - id: base
+    name: base-echo
+    path: harnesses/base/
+agent_runtimes:
+  - id: runtime-a
+    harness: base
+    spec: agent-runtimes/runtime-a.yaml
+cases:
+  root: cases/
+  files:
+    - cases.jsonl
+evaluation:
+  root: evaluation/
+  evaluators:
+    - id: e1
+      method: benchmark
+      script: benchmarks/score.py
+  tracks:
+    - id: quality
+      evaluators: [e1]
+      evidence: [traces]
+objective:
+  primary_track: quality
+  optimize_for: maximize
+collection:
+  traces: true
+  raw: true
+  artifacts: true
+  snapshots: false
+  scores: true
+reports:
+  formats:
+    - md

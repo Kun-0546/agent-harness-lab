@@ -63,14 +63,17 @@ write evidence/issues.jsonl (connector_failure / case_failure / missing_artifact
 
 `hlab run` (run.mode=auto) does Auto Run today and **exits 0**.
 
-**Auto Optimize (NOT implemented — schema/review boundary only).** Given a goal,
-`objective`, `evaluation`, and an editable surface, AHL would iteratively generate
-/ modify Candidate Harnesses, run experiments, evaluate evidence, promote/reject
-candidates, and stop on the objective or a stop condition. v1 validates the
-`objective` / `optimization` schema and the editable/protected-surface boundary,
-and WARNs that the loop is not implemented — it does not generate, run, evaluate,
-or promote anything. (Inspectors, EvaluationRunner, ReportBuilder, and the
-mutation/optimization engine are later phases.)
+**Auto Optimize (bounded, deterministic loop implemented; not autonomous).** Given a
+goal, `objective`, `evaluation`, and an editable surface, AHL runs a bounded loop:
+each iteration copies the incumbent harness to a candidate, optionally mutates it via a
+user `mutation_script`, enforces the editable/protected-surface boundary (a touched
+protected file is rolled back), runs the candidate (Auto Run → Inspector →
+EvaluationRunner), then promotes or rejects it by the promotion policy, stopping on
+`stop_conditions` (max_iterations / no_improvement) under a safety cap. Candidate
+generation is **copy-only or user-script**; it does **not** include LLM-based
+mutation, fully autonomous optimization, remote/distributed optimization, or a general
+self-improvement engine. Each iteration is recorded in `optimization/history.jsonl` and
+`optimization/iterations/iter-NNN/` (per-iteration evidence + record).
 
 Auto Mode v1 required connectors:
 

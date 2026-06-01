@@ -1,27 +1,26 @@
-# 样例 agent
+# Examples
 
-每个文件是一个**最小可跑**的 agent,演示一种接入方式的协议。
-先拿它对着工具跑通,再把里面的样例逻辑换成你自己的 agent。
+Runnable v1 examples. Each is a self-contained workspace; everything is local and
+deterministic — no network, no API keys, no LLM. See
+[`../docs/quickstart.md`](../docs/quickstart.md) for the full walk-through.
 
-| 文件 | 接入方式 | 协议 |
-|------|---------|------|
-| `cli_agent.py` | 外部命令行 | stdin 读 `{"input"}`、stdout 写 `{"response"}`,一行一个 JSON |
-| `library_agent.py` | 进程内库 | 暴露 `respond(history) -> str` |
-| `http_stateless_agent.py` | HTTP无状态 | POST `{"messages"}` → `{"response"}`,每轮发完整历史 |
-| `http_stateful_agent.py` | HTTP有状态 | POST `{"input","session_id"}` → `{"response","session_id"}` |
+| Example | Mode | What it shows |
+|---------|------|---------------|
+| [`auto-run-local-cli-lite/`](auto-run-local-cli-lite/) | Auto Run | drive a `local_cli` harness over cases → evidence → evaluation → report |
+| [`auto-optimize-copy-lite/`](auto-optimize-copy-lite/) | Auto Optimize | the bounded, deterministic candidate → evaluate → promote loop (copy-only) |
 
-每个文件头部都写了它的完整协议、以及怎么在 `connect.md` 里配。
+Run any example from its own directory:
 
-## 怎么用
+```bash
+cd examples/auto-run-local-cli-lite
+PYTHONPATH=../../src python -m agent_harness_lab review experiments/demo
+PYTHONPATH=../../src python -m agent_harness_lab run    experiments/demo
+PYTHONPATH=../../src python -m agent_harness_lab report experiments/demo
+```
 
-1. `connect.md` 里填对应的接入类型和配置(照样例文件头部写的来)。
-2. `ahl run <实验编号>` —— 工具会按这个协议驱动 agent。
-3. 跑通后,把样例里的 `reply()` / `respond()` 换成你真 agent 的逻辑。
+(The examples' runtime command is `python3 agent.py`; on Windows without `python3`,
+edit `command:` in `experiments/demo/agent-runtimes/runtime-a.yaml`.)
 
-样例逻辑都是回显(把收到的话重复一遍),只为让你看清协议,不是真 agent。
-
-## 你的 agent 接不上这四种协议怎么办
-
-写一个小转接脚本:对工具这边说上面某一种协议,对内驱动你自己的 agent
-(它有自己的命令行参数、自己的文件接口,都行)。这种转接代码是你 agent
-专有的,放你自己这边,不进本工具 —— 工具只负责把这四种协议定清楚。
+> Older v0.10 examples — retired concepts such as `program.md` / `ahl` /
+> harness-packages — are archived under [`_legacy_v0.10/`](_legacy_v0.10/) and are
+> not maintained.

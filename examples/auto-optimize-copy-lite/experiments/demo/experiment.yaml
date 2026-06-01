@@ -1,0 +1,54 @@
+# Auto Optimize (copy-only) example — the bounded candidate→evaluate→promote loop.
+# Copy-only: candidates are exact copies of the incumbent (no mutation_script), so
+# none can beat it; the loop runs to max_iterations and records honest history.
+# Run:  hlab review experiments/demo → hlab run experiments/demo → hlab report experiments/demo
+id: demo
+status: draft
+goal_ref: ../../goal.md
+question: "Does the bounded copy-only optimize loop run, evaluate each iteration, and record history?"
+run:
+  mode: auto
+execution:
+  mode: ab
+  state_policy: isolated
+harnesses:
+  - id: base
+    name: base-echo
+    path: harnesses/base/
+agent_runtimes:
+  - id: runtime-a
+    harness: base
+    spec: agent-runtimes/runtime-a.yaml
+cases:
+  root: cases/
+  files:
+    - cases.jsonl
+evaluation:
+  root: evaluation/
+  evaluators:
+    - id: e1
+      method: benchmark
+      script: benchmarks/needs_good.py
+  tracks:
+    - id: quality
+      evaluators: [e1]
+      evidence: [traces]
+objective:
+  primary_track: quality
+  optimize_for: maximize
+optimization:
+  enabled: true
+  editable_surface:
+    - harnesses/base
+  stop_conditions:
+    - type: max_iterations
+      value: 2
+collection:
+  traces: true
+  raw: true
+  artifacts: true
+  snapshots: false
+  scores: true
+reports:
+  formats:
+    - md

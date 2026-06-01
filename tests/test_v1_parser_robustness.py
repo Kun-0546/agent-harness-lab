@@ -617,10 +617,12 @@ class TestAutoOptimizeSchema(_Base):
         self._with("optimization:\n  enabled: true\n  editable_surface:\n    - harnesses/B/\n")
         self.assertIn("missing_stop_conditions", self._codes(ERROR))
 
-    def test_enabled_warns_loop_unimplemented(self):
+    def test_enabled_warns_bounded_only(self):
+        # the bounded deterministic loop IS implemented; the WARN sets expectations
+        # (no LLM-driven / autonomous optimization), it does not say "unimplemented".
         self._with("optimization:\n  enabled: true\n  editable_surface:\n    - harnesses/B/\n" + self._STOP)
         w = self._codes(WARN)
-        self.assertIn("optimization_loop_unimplemented", w)
+        self.assertIn("optimization_bounded_only", w)
         self.assertNotIn("missing_stop_conditions", self._codes(ERROR))
 
     def test_promotion_policy_unknown_ref_errors(self):

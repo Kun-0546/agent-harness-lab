@@ -1,0 +1,13 @@
+id: runtime-a
+connector:
+  type: local_cli
+  # stdin_json IPC: AHL sends {"input": ...} per line, reads {"response": ...} per line.
+  # `python3` must be on PATH; on Windows without python3 use `py agent.py` or `python agent.py`.
+  command: python3 agent.py
+  working_dir: ./harnesses/base
+  timeout: 30
+artifacts:
+  collect:
+    - id: out
+      glob: "produced/**"
+      required: false

@@ -375,12 +375,13 @@ Allowed types: `single_turn`, `script`, `role_play`. Review: unknown type → ER
 `script` requires `script:`; `role_play` requires `actor:` + `policy:` (`max_turns`
 int if present); `role_play` under Auto Mode → WARN (not auto-run in v1).
 
-## 14b. objective + optimization (Auto Optimize — schema/review only)
+## 14b. objective + optimization (Auto Optimize — bounded deterministic loop)
 
-These describe **Auto Optimize**, the second Auto Mode layer. v1 ships the
-**schema + review boundary only** — the optimization loop (generate / run /
-evaluate / promote Candidate Harnesses) is NOT implemented; `enabled: true`
-produces an honest WARN, not execution.
+These describe **Auto Optimize**, the second Auto Mode layer. v1 implements a
+**bounded, deterministic loop**: it generates (copy-only or via a user
+`mutation_script`), runs, evaluates, and promotes Candidate Harnesses within
+`stop_conditions`, recording `optimization/history.jsonl`. There is **no LLM-driven
+or autonomous** mutation; `enabled: true` still emits a WARN to set that expectation.
 
 ```yaml
 objective:
@@ -389,7 +390,7 @@ objective:
   optimize_for: maximize               # maximize | minimize
 
 optimization:
-  enabled: false                       # true → Auto Optimize would run (not built → WARN)
+  enabled: false                       # true → runs the bounded deterministic loop (WARN: not autonomous)
   editable_surface:                    # what a Candidate Harness may change
     - harnesses/B/                     # MUST be harness-controlled (under harnesses/)
   protected_surface:                   # never changed by Auto (defaults below are always protected)
@@ -413,7 +414,8 @@ Review rules:
   `evaluation`, `objective`, `conclusion` — protected by default) → ERROR otherwise.
 - `stop_conditions` is REQUIRED when `optimization.enabled: true` → ERROR otherwise.
 - `promotion_policy` values must reference a known evaluation track id or issue type.
-- `optimization.enabled: true` → WARN (the Auto Optimize loop is not implemented).
+- `optimization.enabled: true` → WARN (`optimization_bounded_only`: the bounded
+  deterministic loop runs; there is no LLM-driven / autonomous optimization).
 
 Roles in optimization are **Candidate Harness** / **Incumbent Harness** — these are
 optimization roles, **not** a return of the old `variant` concept.
