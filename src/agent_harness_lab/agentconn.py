@@ -74,23 +74,28 @@ def _reap(proc: "subprocess.Popen", pgid: "int | None" = None) -> None:
                 pass
     except Exception:  # noqa: BLE001
         pass
-    # release pipe FDs (the child is dead now, so reader threads have hit EOF) —
-    # avoids a ResourceWarning when close() was never called and the finalizer ran.
-    for stream in (proc.stdin, proc.stdout, proc.stderr):
-        if stream is not None:
-            try:
-                stream.close()
-            except Exception:  # noqa: BLE001
-                pass
+    # close ONLY stdin (written by the main thread; nothing contends its lock).
+    # stdout/stderr are owned and closed by their reader threads — closing them
+    # from here could block forever on the BufferedReader lock a reader thread
+    # holds while blocked in `for line in stream` on a not-yet-dead child.
+    try:
+        if proc.stdin is not None:
+            proc.stdin.close()
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _close_session(s: "AgentSession") -> None:
     """Bounded, force-killing teardown shared by both subprocess CLI sessions.
 
     1. close stdin → a well-behaved child sees EOF and exits on its own;
-    2. wait only a brief grace, then force-kill the whole child tree + reap —
-       so a child that refuses to exit can never stall the suite (was a hard 30s);
-    3. close the stdout/stderr pipes so the reader threads see EOF and exit;
+    2. wait a brief grace, then force-kill the whole child tree + reap — a child
+       that refuses to exit can never stall the suite (was a hard 30s);
+    3. join the reader/drain threads so they observe EOF (child dead) and close
+       their OWN stdout/stderr streams. We never close those streams from this
+       thread: that would block on the BufferedReader lock a reader thread holds
+       while blocked on a live child — the non-verbose `unittest discover` hang.
+       join is bounded; if a thread is somehow still alive we just move on.
     4. detach the finalizer (we cleaned up; don't double-run at GC/exit).
     """
     try:
@@ -102,19 +107,17 @@ def _close_session(s: "AgentSession") -> None:
         s.proc.wait(timeout=_CLOSE_GRACE)
     except Exception:  # noqa: BLE001
         _reap(s.proc, getattr(s, "_pgid", None))
-    finally:
-        for stream in (s.proc.stdout, s.proc.stderr):
-            if stream is not None:
-                try:
-                    stream.close()
-                except Exception:  # noqa: BLE001
-                    pass
-        fin = getattr(s, "_finalizer", None)
-        if fin is not None:
-            try:
-                fin.detach()
-            except Exception:  # noqa: BLE001
-                pass
+    for t in getattr(s, "_threads", ()):
+        try:
+            t.join(timeout=_CLOSE_GRACE)
+        except Exception:  # noqa: BLE001
+            pass
+    fin = getattr(s, "_finalizer", None)
+    if fin is not None:
+        try:
+            fin.detach()
+        except Exception:  # noqa: BLE001
+            pass
 
 
 class AgentSession:
@@ -201,22 +204,41 @@ class _CliSession(AgentSession):
         self._finalizer = weakref.finalize(self, _reap, self.proc, self._pgid)
         self._lines: queue.Queue = queue.Queue()
         self._stderr_tail: collections.deque = collections.deque(maxlen=20)
-        threading.Thread(target=self._read_stdout, daemon=True).start()
-        threading.Thread(target=self._drain_stderr, daemon=True).start()
+        t_out = threading.Thread(target=self._read_stdout, daemon=True)
+        t_err = threading.Thread(target=self._drain_stderr, daemon=True)
+        self._threads = (t_out, t_err)
+        t_out.start()
+        t_err.start()
 
     def _read_stdout(self) -> None:
-        """后台线程:子进程 stdout 一行行塞进队列,EOF 塞 None。"""
-        assert self.proc.stdout
-        for line in self.proc.stdout:
-            self._lines.put(line)
-        self._lines.put(None)
+        """后台线程:stdout 逐行进队列,EOF 塞 None;退出时关自己的流(本线程持锁,安全)。"""
+        out = self.proc.stdout
+        if out is None:
+            self._lines.put(None)
+            return
+        try:
+            for line in out:
+                self._lines.put(line)
+        finally:
+            self._lines.put(None)
+            try:
+                out.close()
+            except Exception:  # noqa: BLE001
+                pass
 
     def _drain_stderr(self) -> None:
-        """后台线程:持续读 stderr —— 不读会填满 pipe、卡死子进程;留最近几行报错用。"""
-        if self.proc.stderr is None:
+        """后台线程:持续 drain stderr(不读会填满 pipe 卡死子进程);退出时关自己的流。"""
+        err = self.proc.stderr
+        if err is None:
             return
-        for line in self.proc.stderr:
-            self._stderr_tail.append(line)
+        try:
+            for line in err:
+                self._stderr_tail.append(line)
+        finally:
+            try:
+                err.close()
+            except Exception:  # noqa: BLE001
+                pass
 
     def send(self, user_text: str) -> str:
         assert self.proc.stdin
@@ -271,20 +293,39 @@ class _SandboxCliSession(AgentSession):
         self._finalizer = weakref.finalize(self, _reap, self.proc, self._pgid)
         self._lines: queue.Queue = queue.Queue()
         self._stderr_tail: collections.deque = collections.deque(maxlen=20)
-        threading.Thread(target=self._read_stdout, daemon=True).start()
-        threading.Thread(target=self._drain_stderr, daemon=True).start()
+        t_out = threading.Thread(target=self._read_stdout, daemon=True)
+        t_err = threading.Thread(target=self._drain_stderr, daemon=True)
+        self._threads = (t_out, t_err)
+        t_out.start()
+        t_err.start()
 
     def _read_stdout(self) -> None:
-        assert self.proc.stdout
-        for line in self.proc.stdout:
-            self._lines.put(line)
-        self._lines.put(None)
+        out = self.proc.stdout
+        if out is None:
+            self._lines.put(None)
+            return
+        try:
+            for line in out:
+                self._lines.put(line)
+        finally:
+            self._lines.put(None)
+            try:
+                out.close()  # same thread holds the lock → safe (no cross-thread close)
+            except Exception:  # noqa: BLE001
+                pass
 
     def _drain_stderr(self) -> None:
-        if self.proc.stderr is None:
+        err = self.proc.stderr
+        if err is None:
             return
-        for line in self.proc.stderr:
-            self._stderr_tail.append(line)
+        try:
+            for line in err:
+                self._stderr_tail.append(line)
+        finally:
+            try:
+                err.close()
+            except Exception:  # noqa: BLE001
+                pass
 
     def send(self, user_text: str) -> str:
         assert self.proc.stdin

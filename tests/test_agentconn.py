@@ -161,9 +161,11 @@ class TestSessionTeardownReliability(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
         self.sandbox = Path(self._tmp.name)
-        # an agent that NEVER reads stdin and won't exit on EOF — the worst case
+        # an agent that NEVER reads stdin and won't exit on EOF — the worst case.
+        # sleep is bounded (30s) so even a worst-case missed kill self-terminates
+        # well under any CI timeout; close() is expected to kill it in ~grace seconds.
         (self.sandbox / "agent.py").write_text(
-            "import time\ntime.sleep(300)\n", encoding="utf-8")
+            "import time\ntime.sleep(30)\n", encoding="utf-8")
 
     def _cmd(self):
         return f'"{sys.executable}" agent.py'
@@ -179,6 +181,29 @@ class TestSessionTeardownReliability(unittest.TestCase):
                              "close() must terminate a stdin-ignoring child")
         self.assertLess(elapsed, 30,                 # bounded: not the old 30s-per-call, never 300s
                         f"close() took {elapsed:.1f}s — must be bounded by the grace, not hang")
+
+    def test_close_bounded_when_child_floods_stdout_and_ignores_stdin(self):
+        # Reproduces the non-verbose `unittest discover` hang: a child that ignores
+        # stdin and continuously writes stdout keeps the reader thread inside a
+        # blocking read holding the stream's BufferedReader lock. close() must NOT
+        # close that stream from the main thread (which would block on the lock) —
+        # it force-kills, joins the reader threads (which close their own streams),
+        # and returns within the grace.
+        import time
+        (self.sandbox / "agent.py").write_text(
+            "import sys, time\n"
+            "while True:\n"
+            "    sys.stdout.write('x\\n'); sys.stdout.flush()\n"
+            "    time.sleep(0.005)\n", encoding="utf-8")
+        sess = _SandboxCliSession(self._cmd(), cwd=self.sandbox)
+        t0 = time.monotonic()
+        sess.close()
+        elapsed = time.monotonic() - t0
+        self.assertIsNotNone(sess.proc.poll(), "child must be terminated by close()")
+        self.assertLess(elapsed, 30, f"close() blocked {elapsed:.1f}s — stream-lock deadlock")
+        for t in sess._threads:
+            self.assertFalse(t.is_alive(), "reader thread left alive after close()")
+        self.assertTrue(sess.proc.stdout.closed, "reader thread should have closed stdout")
 
     def test_unclosed_session_child_is_reaped_by_finalizer(self):
         sess = _SandboxCliSession(self._cmd(), cwd=self.sandbox)
