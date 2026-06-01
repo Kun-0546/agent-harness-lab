@@ -1,5 +1,6 @@
 """workflow 的单测 —— run 前的聚合校验、基线数量、parse 异常翻译、review 三态。"""
 import json
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -324,76 +325,10 @@ class TestLegacyDetection(unittest.TestCase):
         self.assertIn("cases/", msg)
         self.assertIn("请改名为", msg)
 
-    def test_legacy_simulator_md_triggers_friendly_error_via_cli(self):
-        """有 模拟器.md 没 simulator.md → cli simulator 命令抛友好错误。"""
-        import io
-        import os
-        from contextlib import redirect_stderr
-        from agent_harness_lab import cli as cli_mod
-
-        (self.exp / "harnesses").mkdir()
-        (self.exp / "cases").mkdir()
-        (self.exp / "模拟器.md").write_text(
-            "## 人设\n一个用户\n\n## 追问策略\n追问\n", encoding="utf-8")
-
-        original = Path.cwd()
-        os.chdir(self.root)
-        try:
-            err = io.StringIO()
-            with redirect_stderr(err):
-                exit_code = cli_mod.main(["simulator", "001"])
-            self.assertEqual(exit_code, 1)
-            err_text = err.getvalue()
-            self.assertIn("模拟器.md", err_text)
-            self.assertIn("simulator.md", err_text)
-            self.assertIn("请改名为", err_text)
-        finally:
-            os.chdir(original)
-
-    def test_harnesses_subcommand_invokes_cmd_versions(self):
-        """ahl harnesses <exp> 复用 cmd_versions 逻辑,读出 harnesses/ 下的 variants。"""
-        import io
-        import os
-        from contextlib import redirect_stdout
-        from agent_harness_lab import cli as cli_mod
-
-        (self.exp / "harnesses").mkdir()
-        (self.exp / "harnesses" / "V1.md").write_text(
-            "---\nid: V1\n基线: 是\n---\n## 这是什么\nx\n", encoding="utf-8")
-
-        original = Path.cwd()
-        os.chdir(self.root)
-        try:
-            out = io.StringIO()
-            with redirect_stdout(out):
-                exit_code = cli_mod.main(["harnesses", "001"])
-            self.assertEqual(exit_code, 0)
-            out_text = out.getvalue()
-            self.assertIn("harnesses:1 个", out_text)
-            self.assertIn("V1", out_text)
-        finally:
-            os.chdir(original)
-
-    def test_versions_subcommand_redirects_to_harnesses(self):
-        """Phase 3:ahl versions <exp> 不再正常执行,打印 legacy redirect 并 exit 1。"""
-        import io
-        import os
-        from contextlib import redirect_stderr
-        from agent_harness_lab import cli as cli_mod
-
-        original = Path.cwd()
-        os.chdir(self.root)
-        try:
-            err = io.StringIO()
-            with redirect_stderr(err):
-                exit_code = cli_mod.main(["versions", "001"])
-            self.assertEqual(exit_code, 1)
-            err_text = err.getvalue()
-            self.assertIn("versions", err_text)
-            self.assertIn("harnesses", err_text)
-            self.assertIn("请用", err_text)
-        finally:
-            os.chdir(original)
+    # v1 migration: the CLI-level legacy redirects (simulator / harnesses /
+    # versions subcommands) were removed when the public surface collapsed to
+    # the 6-command `hlab` set. The workflow-level legacy-dir detection above
+    # (versions/ and 测试集/) is retained because workflow.run is unchanged.
 
 
 # ---- Runtime Materialization local_path (C5) ----
@@ -597,6 +532,7 @@ for line in sys.stdin:
 # ---- Runtime Materialization git_repo (C6) ----
 
 
+@unittest.skipUnless(shutil.which("git"), "git 不在 PATH —— 跳过 git_repo 端到端集成测试")
 class TestRuntimeSourceGitRepoPreflight(unittest.TestCase):
     """C6: git_repo runtime_source 通过 preflight + materialize (clone+checkout)
     + 走完整 run/snapshot 链路。本地 git init mock repo,不联网。
@@ -630,19 +566,15 @@ for line in sys.stdin:
     sys.stdout.write(json.dumps({"response": "git-echo:" + data["input"]}) + "\\n")
     sys.stdout.flush()
 """
+        from tests.githelper import git  # bounded, non-interactive git (no hang)
         self.repo = self.root / "mock-repo"
         self.repo.mkdir()
-        sp.run(["git", "init", "-b", "main", str(self.repo)],
-               check=True, capture_output=True)
-        sp.run(["git", "-C", str(self.repo), "config", "user.email", "t@t"],
-               check=True, capture_output=True)
-        sp.run(["git", "-C", str(self.repo), "config", "user.name", "t"],
-               check=True, capture_output=True)
+        git(["init", "-b", "main"], cwd=self.repo)
+        git(["config", "user.email", "t@t"], cwd=self.repo)
+        git(["config", "user.name", "t"], cwd=self.repo)
         (self.repo / "agent.py").write_text(echo_script, encoding="utf-8")
-        sp.run(["git", "-C", str(self.repo), "add", "."],
-               check=True, capture_output=True)
-        sp.run(["git", "-C", str(self.repo), "commit", "-m", "init"],
-               check=True, capture_output=True)
+        git(["add", "."], cwd=self.repo)
+        git(["commit", "-m", "init"], cwd=self.repo)
 
         # runtime-sources.md 声明 git_repo source
         (self.root / "runtime-sources.md").write_text(

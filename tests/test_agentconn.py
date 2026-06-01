@@ -150,5 +150,50 @@ for line in sys.stdin:
             sess.close()
 
 
+class TestSessionTeardownReliability(unittest.TestCase):
+    """No agent subprocess may survive, and close() must never stall the suite.
+
+    Guards the aggregate-discovery hang: a child that ignores stdin (never exits
+    on EOF) must still be force-killed promptly by close(), and a session that is
+    never closed must still have its child reaped (weakref finalizer)."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.sandbox = Path(self._tmp.name)
+        # an agent that NEVER reads stdin and won't exit on EOF — the worst case
+        (self.sandbox / "agent.py").write_text(
+            "import time\ntime.sleep(300)\n", encoding="utf-8")
+
+    def _cmd(self):
+        return f'"{sys.executable}" agent.py'
+
+    def test_close_force_kills_child_that_ignores_stdin_promptly(self):
+        import time
+        sess = _SandboxCliSession(self._cmd(), cwd=self.sandbox)
+        self.assertIsNone(sess.proc.poll())          # running
+        t0 = time.monotonic()
+        sess.close()
+        elapsed = time.monotonic() - t0
+        self.assertIsNotNone(sess.proc.poll(),       # terminated + reaped
+                             "close() must terminate a stdin-ignoring child")
+        self.assertLess(elapsed, 30,                 # bounded: not the old 30s-per-call, never 300s
+                        f"close() took {elapsed:.1f}s — must be bounded by the grace, not hang")
+
+    def test_unclosed_session_child_is_reaped_by_finalizer(self):
+        sess = _SandboxCliSession(self._cmd(), cwd=self.sandbox)
+        proc = sess.proc
+        self.assertIsNone(proc.poll())               # running
+        sess._finalizer()                            # simulate GC/at-exit finalization
+        self.assertIsNotNone(proc.poll(),
+                             "a never-closed session's child must be reaped (no survivor)")
+
+    def test_close_is_idempotent(self):
+        sess = _SandboxCliSession(self._cmd(), cwd=self.sandbox)
+        sess.close()
+        sess.close()  # second close must not raise
+        self.assertIsNotNone(sess.proc.poll())
+
+
 if __name__ == "__main__":
     unittest.main()

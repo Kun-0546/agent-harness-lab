@@ -1,3 +1,3 @@
-"""Agent Harness Lab — AI 产品研究的实验循环。"""
+"""Agent Harness Lab — run goal-driven harness experiments on real Agent Runtimes."""
 
-__version__ = "0.1.0"
+__version__ = "1.0.0.dev0"

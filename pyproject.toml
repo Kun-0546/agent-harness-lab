@@ -1,9 +1,11 @@
 [project]
 name = "agent-harness-lab"
-version = "0.10.0"
-description = "A workflow tool for designing, testing, and improving agent runtime harnesses."
+version = "1.0.0.dev0"
+description = "Run goal-driven harness experiments on real Agent Runtimes."
 requires-python = ">=3.10"
-dependencies = []
+dependencies = [
+  "pyyaml>=6.0",
+]
 license = { text = "MIT" }
 authors = [
   { name = "Kun" },
@@ -41,8 +43,8 @@ Issues = "https://github.com/Kun-0546/agent-harness-lab/issues"
 Changelog = "https://github.com/Kun-0546/agent-harness-lab/blob/main/CHANGELOG.md"
 
 [project.scripts]
-ahl = "agent_harness_lab.cli:main"
-hdl = "agent_harness_lab.cli:hdl_legacy_redirect"
+hlab = "agent_harness_lab.cli:main"
+ahl = "agent_harness_lab.cli:ahl_redirect"
 
 [build-system]
 requires = ["setuptools>=68"]

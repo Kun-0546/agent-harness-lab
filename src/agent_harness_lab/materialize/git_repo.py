@@ -37,6 +37,25 @@ from agent_harness_lab.patch import apply_patch
 from agent_harness_lab.runtime_source import RuntimeSource
 from agent_harness_lab.version import Version
 
+# git 子进程硬上限:任何 git 操作超时即中止,绝不无限挂起。
+# 默认 120s,可用 AHL_GIT_TIMEOUT 调(测试套件设更短值)。
+try:
+    _GIT_TIMEOUT = float(os.environ.get("AHL_GIT_TIMEOUT", "120"))
+except ValueError:
+    _GIT_TIMEOUT = 120.0
+
+
+def _git_env() -> dict:
+    """非交互 git 环境:任何情况都不在凭据/终端提示上阻塞。
+
+    没有这些变量时,git 在非交互环境(CI/sandbox)里 clone 一个需要认证的 url
+    会卡在用户名/密码提示上无限等待——配合下面的 timeout 彻底杜绝挂起。
+    """
+    env = dict(os.environ)
+    env["GIT_TERMINAL_PROMPT"] = "0"   # 不弹 username/password 终端提示
+    env["GCM_INTERACTIVE"] = "never"   # Git Credential Manager 不弹窗
+    return env
+
 
 def _lookup_source(version: Version, ctx: MaterializeContext) -> RuntimeSource:
     """从 ctx.runtime_sources 找 version.runtime_source 对应 source。
@@ -71,7 +90,11 @@ def _git_run(git: str, args: list[str], cwd: Path | None = None) -> None:
             [git] + args,
             check=True, capture_output=True, text=True,
             cwd=str(cwd) if cwd else None,
+            timeout=_GIT_TIMEOUT, env=_git_env(),
         )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(
+            f"git {args[0]} 超过 {_GIT_TIMEOUT:g}s 未返回(疑似卡在网络/凭据提示),已中止") from exc
     except subprocess.CalledProcessError as exc:
         stderr = (exc.stderr or "").strip()[:300]
         raise RuntimeError(
@@ -94,8 +117,12 @@ def _git_capture(git: str, args: list[str], cwd: Path | None = None) -> str:
             [git] + args,
             check=True, capture_output=True, text=True,
             cwd=str(cwd) if cwd else None,
+            timeout=_GIT_TIMEOUT, env=_git_env(),
         )
         return result.stdout
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(
+            f"git {args[0]} 超过 {_GIT_TIMEOUT:g}s 未返回(疑似卡在网络/凭据提示),已中止") from exc
     except subprocess.CalledProcessError as exc:
         stderr = (exc.stderr or "").strip()[:300]
         raise RuntimeError(

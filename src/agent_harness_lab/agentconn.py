@@ -14,14 +14,107 @@ import json
 import os
 import queue
 import shlex
+import signal
 import subprocess
 import threading
 import urllib.error
 import urllib.request
+import weakref
 from pathlib import Path
 from typing import Mapping
 
 from agent_harness_lab.connect import Connect
+
+# POSIX lets us put a child in its own session/process group (start_new_session)
+# and then kill the WHOLE group — so a shell's grandchild (e.g. `sh -c "python
+# agent.py"`) can't be orphaned and left running. Windows has no killpg.
+_POSIX = hasattr(os, "killpg")
+
+# How long close() waits for a child to exit cleanly on stdin-EOF before it
+# force-kills it. Bounded so a child that won't exit can NEVER stall the test
+# suite (the previous hard-coded 30s, summed across IPC tests, could blow a CI
+# timeout). Override with AHL_AGENT_CLOSE_GRACE.
+try:
+    _CLOSE_GRACE = float(os.environ.get("AHL_AGENT_CLOSE_GRACE", "3"))
+except ValueError:
+    _CLOSE_GRACE = 3.0
+
+
+def _pgid_of(proc: "subprocess.Popen") -> "int | None":
+    """The child's own process-group id (POSIX) so we can kill the whole tree.
+
+    The child is started with start_new_session=True, so it leads a NEW session
+    and process group whose pgid == its pid. We return proc.pid directly rather
+    than os.getpgid(): getpgid is racy right after spawn (can briefly return the
+    PARENT's group before the child's setsid completes) — killpg on the parent's
+    group would kill the test runner itself. Targeting proc.pid can only ever hit
+    the child's own group. None on non-POSIX (Windows uses proc.kill()).
+    """
+    return proc.pid if _POSIX else None
+
+
+def _reap(proc: "subprocess.Popen", pgid: "int | None" = None) -> None:
+    """Force-terminate a child (its whole process group on POSIX) and reap it.
+
+    Idempotent and never raises — safe to call from close(), a weakref finalizer,
+    or at interpreter exit. Guarantees no child process survives.
+    """
+    try:
+        if proc.poll() is None:
+            if _POSIX and pgid is not None:
+                try:
+                    os.killpg(pgid, signal.SIGKILL)
+                except Exception:  # noqa: BLE001 — group gone / not permitted → fall back
+                    proc.kill()
+            else:
+                proc.kill()
+            try:
+                proc.wait(timeout=5)  # reap so it does not linger as a zombie
+            except Exception:  # noqa: BLE001
+                pass
+    except Exception:  # noqa: BLE001
+        pass
+    # release pipe FDs (the child is dead now, so reader threads have hit EOF) —
+    # avoids a ResourceWarning when close() was never called and the finalizer ran.
+    for stream in (proc.stdin, proc.stdout, proc.stderr):
+        if stream is not None:
+            try:
+                stream.close()
+            except Exception:  # noqa: BLE001
+                pass
+
+
+def _close_session(s: "AgentSession") -> None:
+    """Bounded, force-killing teardown shared by both subprocess CLI sessions.
+
+    1. close stdin → a well-behaved child sees EOF and exits on its own;
+    2. wait only a brief grace, then force-kill the whole child tree + reap —
+       so a child that refuses to exit can never stall the suite (was a hard 30s);
+    3. close the stdout/stderr pipes so the reader threads see EOF and exit;
+    4. detach the finalizer (we cleaned up; don't double-run at GC/exit).
+    """
+    try:
+        if s.proc.stdin and not s.proc.stdin.closed:
+            s.proc.stdin.close()
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        s.proc.wait(timeout=_CLOSE_GRACE)
+    except Exception:  # noqa: BLE001
+        _reap(s.proc, getattr(s, "_pgid", None))
+    finally:
+        for stream in (s.proc.stdout, s.proc.stderr):
+            if stream is not None:
+                try:
+                    stream.close()
+                except Exception:  # noqa: BLE001
+                    pass
+        fin = getattr(s, "_finalizer", None)
+        if fin is not None:
+            try:
+                fin.detach()
+            except Exception:  # noqa: BLE001
+                pass
 
 
 class AgentSession:
@@ -100,7 +193,12 @@ class _CliSession(AgentSession):
             command, shell=True,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, encoding="utf-8", env=_child_env(),
+            close_fds=True, start_new_session=_POSIX,
         )
+        self._pgid = _pgid_of(self.proc)
+        # safety net: if this session is never close()d, the child is still
+        # force-killed on GC and at interpreter exit — no agent subprocess survives.
+        self._finalizer = weakref.finalize(self, _reap, self.proc, self._pgid)
         self._lines: queue.Queue = queue.Queue()
         self._stderr_tail: collections.deque = collections.deque(maxlen=20)
         threading.Thread(target=self._read_stdout, daemon=True).start()
@@ -127,7 +225,7 @@ class _CliSession(AgentSession):
         try:
             line = self._lines.get(timeout=self.timeout)
         except queue.Empty:
-            self.proc.kill()
+            _reap(self.proc, self._pgid)
             raise RuntimeError(
                 f"agent 这一轮超过 {self.timeout:g} 秒没回话,判定卡死") from None
         if line is None:
@@ -136,12 +234,7 @@ class _CliSession(AgentSession):
         return str(json.loads(line).get("response", ""))
 
     def close(self) -> None:
-        try:
-            if self.proc.stdin:
-                self.proc.stdin.close()
-            self.proc.wait(timeout=30)
-        except Exception:  # noqa: BLE001
-            self.proc.kill()
+        _close_session(self)
 
 
 class _SandboxCliSession(AgentSession):
@@ -172,7 +265,10 @@ class _SandboxCliSession(AgentSession):
             args, shell=False, cwd=str(cwd),
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, encoding="utf-8", env=env,
+            close_fds=True, start_new_session=_POSIX,
         )
+        self._pgid = _pgid_of(self.proc)
+        self._finalizer = weakref.finalize(self, _reap, self.proc, self._pgid)
         self._lines: queue.Queue = queue.Queue()
         self._stderr_tail: collections.deque = collections.deque(maxlen=20)
         threading.Thread(target=self._read_stdout, daemon=True).start()
@@ -198,7 +294,7 @@ class _SandboxCliSession(AgentSession):
         try:
             line = self._lines.get(timeout=self.timeout)
         except queue.Empty:
-            self.proc.kill()
+            _reap(self.proc, self._pgid)
             raise RuntimeError(
                 f"agent 这一轮超过 {self.timeout:g} 秒没回话,判定卡死") from None
         if line is None:
@@ -207,22 +303,7 @@ class _SandboxCliSession(AgentSession):
         return str(json.loads(line).get("response", ""))
 
     def close(self) -> None:
-        try:
-            if self.proc.stdin:
-                self.proc.stdin.close()
-            self.proc.wait(timeout=30)
-        except Exception:  # noqa: BLE001
-            self.proc.kill()
-        finally:
-            # 显式关 stdout/stderr pipes —— 避免 ResourceWarning。
-            # proc 退出后 stdout/stderr 自然 EOF,reader thread 也已 exit,
-            # close 是 safe 的。defensive try/except 防止 race。
-            for stream in (self.proc.stdout, self.proc.stderr):
-                if stream is not None:
-                    try:
-                        stream.close()
-                    except Exception:  # noqa: BLE001
-                        pass
+        _close_session(self)
 
 
 class _LibrarySession(AgentSession):

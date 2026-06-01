@@ -14,6 +14,7 @@
 测试用本地 tempdir + git init + commit 造 mock repo,url 用 file:// 协议 (无网络)。
 """
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -28,6 +29,12 @@ from agent_harness_lab.runtime_source import RuntimeSource
 from agent_harness_lab.version import Version
 
 
+def setUpModule():
+    """整个文件都依赖 git binary;不在 PATH 时干净跳过(而非报错/挂起)。"""
+    if shutil.which("git") is None:
+        raise unittest.SkipTest("git 不在 PATH —— 跳过 git_repo 集成测试")
+
+
 def _make_version(version_id="V1", runtime_source=None, patch=None):
     return Version(
         path=Path("fake.md"),
@@ -40,13 +47,7 @@ def _make_version(version_id="V1", runtime_source=None, patch=None):
     )
 
 
-def _git(args, cwd=None):
-    """跑 git 命令 helper (test 内造 mock repo 用)。"""
-    subprocess.run(
-        ["git"] + args,
-        check=True, capture_output=True, text=True,
-        cwd=str(cwd) if cwd else None,
-    )
+from tests.githelper import git as _git  # bounded, non-interactive git (no hang)
 
 
 def _make_mock_repo(root: Path, files: dict | None = None) -> Path:
@@ -183,10 +184,7 @@ class TestGitRepoAdapterRefs(unittest.TestCase):
         _git(["add", "."], cwd=self.repo)
         _git(["commit", "-m", "v2"], cwd=self.repo)
         # 拿 first commit sha
-        out = subprocess.run(
-            ["git", "rev-list", "main", "--reverse"],
-            check=True, capture_output=True, text=True, cwd=str(self.repo)
-        ).stdout
+        out = _git(["rev-list", "main", "--reverse"], cwd=self.repo).stdout
         self.first_sha = out.split()[0]
         # 在 main HEAD 加 tag
         _git(["tag", "v1.0"], cwd=self.repo)

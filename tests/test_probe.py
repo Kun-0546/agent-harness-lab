@@ -6,6 +6,7 @@ Covers spec docs/runtime-probe-mvp.md §6 (per-target probe), §7 (artifact),
 from __future__ import annotations
 
 import json
+import shutil
 import sys
 import unittest
 from pathlib import Path
@@ -176,28 +177,20 @@ class TestProbeLocalPath(unittest.TestCase):
 # ===========================================================================
 
 
+@unittest.skipUnless(shutil.which("git"), "git 不在 PATH —— 跳过 git_repo probe 集成测试")
 class TestProbeGitRepo(unittest.TestCase):
 
     def _make_git_repo(self, tmp: Path) -> str:
         """Create a local git repo with one commit on main; return file:// URL."""
-        import subprocess
+        from tests.githelper import git  # bounded, non-interactive git (no hang)
         repo = tmp / "repo"
         repo.mkdir()
-        env = {"GIT_AUTHOR_NAME": "T", "GIT_AUTHOR_EMAIL": "t@t",
-               "GIT_COMMITTER_NAME": "T", "GIT_COMMITTER_EMAIL": "t@t"}
-        for cmd in (
-            ["git", "init", "-b", "main"],
-            ["git", "config", "user.email", "t@t"],
-            ["git", "config", "user.name", "T"],
-        ):
-            subprocess.run(cmd, cwd=repo, check=True, capture_output=True,
-                           env={**os.environ, **env})
+        git(["init", "-b", "main"], cwd=repo)
+        git(["config", "user.email", "t@t"], cwd=repo)
+        git(["config", "user.name", "T"], cwd=repo)
         (repo / "README.md").write_text("x", encoding="utf-8")
-        subprocess.run(["git", "add", "."], cwd=repo, check=True,
-                       capture_output=True, env={**os.environ, **env})
-        subprocess.run(["git", "commit", "-m", "init"], cwd=repo,
-                       check=True, capture_output=True,
-                       env={**os.environ, **env})
+        git(["add", "."], cwd=repo)
+        git(["commit", "-m", "init"], cwd=repo)
         return f"file://{repo.as_posix()}"
 
     def test_ok(self):

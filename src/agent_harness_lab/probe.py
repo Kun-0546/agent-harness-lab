@@ -221,6 +221,9 @@ def _probe_git_repo(src) -> dict:
             [git, "ls-remote", url, ref] if ref else [git, "ls-remote", url],
             capture_output=True, text=True, encoding="utf-8",
             errors="replace", timeout=_GIT_LSREMOTE_TIMEOUT, check=False,
+            # non-interactive: never block on a credential/terminal prompt
+            # (consistent with materialize/git_repo.py; timeout is the backstop).
+            env={**os.environ, "GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never"},
         )
     except subprocess.TimeoutExpired:
         return {

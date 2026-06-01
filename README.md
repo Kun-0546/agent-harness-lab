@@ -2,6 +2,14 @@
 
 English | [中文](README_CN.md)
 
+> ⚠️ **v1 migration in progress.** This README still describes the retired
+> v0.10 `ahl` command surface. The current v1 CLI is **`hlab`** (commands:
+> `init / new / review / run / status / report`). For what is implemented today,
+> see [`docs/v1-phase1-status.md`](docs/v1-phase1-status.md),
+> [`docs/v1-concept-inventory.md`](docs/v1-concept-inventory.md), and the
+> migration plan [`docs/migration-from-v0.10.0-to-v1.md`](docs/migration-from-v0.10.0-to-v1.md).
+> This README will be rewritten in a later phase.
+
 > A workbench for humans and coding agents to design, test, and improve the **runtime harnesses** that shape agent behavior.
 
 Change a harness — a prompt, a tool config, a memory rule, a workflow — then measure whether the change made the agent better, worse, or no different. `ahl` runs experiments: you describe a goal, a set of harness variants, a set of test cases, and a rubric; the tool drives each variant through the cases, scores the conversations, and lays the variants side by side so you can see what the change did.
