@@ -172,8 +172,9 @@ explicit review semantics (none is an inert enum):
 
 ```text
 isolated         each case/harness run is independent — fully supported, no extra config
-reset            runtime reused, reset before each run; Auto -> state_policy_reset_pending WARN
-                 (per-run reset runs in AutoRunner, not implemented yet)
+reset            runtime reused, fresh process before each run (no in-process state carries);
+                 IMPLEMENTED in Auto — AutoRunner restarts the local_cli session per case, and
+                 the script connector is already a fresh process per case
 cumulative       state persists across cases; Auto -> auto_state_policy_unimplemented WARN
 snapshot_branch  branch from a shared snapshot; Auto -> auto_state_policy_unimplemented WARN;
                  + collection.snapshots off -> snapshots_not_collected WARN

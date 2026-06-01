@@ -1,5 +1,6 @@
-"""run: Copilot Mode generates agent-task.md (exit 0); Auto Mode + report do NOT
-fake success (exit 2); a config ERROR blocks run/report (exit 1); status works."""
+"""run: Copilot Mode generates agent-task.md (exit 0); Auto Mode runs (exit 0);
+report generates reports/report.md (exit 0); a config ERROR blocks run/report
+(exit 1); status works."""
 import io
 import os
 import shutil
@@ -106,11 +107,20 @@ class TestReport(unittest.TestCase):
             rc, _out, _err = _invoke(["report", "experiments/demo"])
             self.assertEqual(rc, 1)  # symmetric with run; not a fake exit-2
 
-    def test_report_exit_2_explicit(self):
-        with workspace_with_experiment() as _ws:
-            rc, _out, err = _invoke(["report", "experiments/demo"])
-            self.assertEqual(rc, 2, "report must not return success when nothing generated")
-            self.assertIn("no report was generated", err)
+    def test_report_generates_report_md_exit_0(self):
+        with workspace_with_experiment() as ws:
+            rc, out, _err = _invoke(["report", "experiments/demo"])
+            self.assertEqual(rc, 0)
+            md = ws / "experiments" / "demo" / "reports" / "report.md"
+            self.assertTrue(md.is_file())
+            text = md.read_text(encoding="utf-8")
+            self.assertIn("# Experiment Report", text)
+            self.assertIn("## Known limitations", text)
+            self.assertIn("conclusion.md", text)  # points at next step, never fabricates one
+            self.assertIn("report generated", out)
+            # it did not write a conclusion for the user
+            self.assertFalse((ws / "experiments" / "demo" / "conclusion.md").exists()
+                             and "fabricated" in text)
 
     def test_report_not_found_exit_1(self):
         with workspace_with_experiment() as _ws:

@@ -534,9 +534,13 @@ class TestStatePolicySemantics(_Base):
         self.assertNotIn("auto_state_policy_unimplemented", w)
         self.assertNotIn("state_policy_reset_pending", w)
 
-    def test_reset_warns_pending(self):
+    def test_reset_supported_no_pending_warn(self):
+        # reset is implemented in Auto v1 (AutoRunner restarts a fresh process per
+        # case), so — like isolated — it no longer warns "pending"/"unimplemented".
         self._auto_with("reset")
-        self.assertIn("state_policy_reset_pending", self._codes(WARN))
+        w = self._codes(WARN)
+        self.assertNotIn("state_policy_reset_pending", w)
+        self.assertNotIn("auto_state_policy_unimplemented", w)
 
     def test_cumulative_warns_unimplemented(self):
         self._auto_with("cumulative")

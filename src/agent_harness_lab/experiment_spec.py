@@ -766,15 +766,13 @@ def validate_spec(spec: ExperimentSpec, experiment_dir: Path) -> list[Problem]:
 
     # per-StatePolicy review semantics — every value is handled, none is an inert enum:
     #   isolated        : each case/harness run is independent — fully supported, no extra config.
-    #   reset           : runtime reused but reset before each run (per-run reset step).
+    #   reset           : runtime reused but reset (fresh process) before each run — IMPLEMENTED
+    #                     in Auto Mode (AutoRunner restarts the local_cli session per case; the
+    #                     script connector is already a fresh process per case). No WARN needed.
     #   cumulative      : state persists across cases (see auto_state_policy_unimplemented).
     #   snapshot_branch : branch from a shared snapshot (see snapshots_not_collected below).
     #   replay          : do not rerun the runtime; evaluate already-collected evidence.
     _sp = spec.state_policy if isinstance(spec.state_policy, str) and spec.state_policy in STATE_POLICIES else None
-    if _sp == "reset" and spec.run_mode == "auto":
-        warn("state_policy_reset_pending",
-             "state_policy=reset reuses the Agent Runtime and resets it before each run; "
-             "the per-run reset step runs in Auto Mode (AutoRunner), not implemented yet")
     if _sp == "replay" or spec.execution_mode == "replay":
         ev_dir = experiment_dir / "evidence"
         _has_evidence = ev_dir.is_dir() and any(

@@ -6,8 +6,11 @@ agent/script in a working dir, then runs it and inspects evidence/ + issues.json
 import io
 import json
 import os
+import signal
+import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -76,6 +79,51 @@ _ECHO_COND = (
     "        open('produced/out.txt','w',encoding='utf-8').write('art')\n"
     "    sys.stdout.write(json.dumps({'response':'ok'})+'\\n'); sys.stdout.flush()\n"
 )
+# Script whose DIRECT child exits at once but backgrounds a worker that INHERITS
+# the child's stdout/stderr and lives far longer than the connector timeout. Under
+# the old PIPE+communicate path this worker held the pipe open, so communicate()
+# could not see EOF and parked the main thread (the canonical hang). It writes its
+# pid (so a test can verify reaping) and would write survivor_finished.txt only if
+# it survives its full sleep.
+_SCRIPT_BG_SURVIVOR = (
+    "import json,sys,os,subprocess\n"
+    "case=json.load(open(sys.argv[1],encoding='utf-8'))\n"
+    "out_dir=sys.argv[2]\n"
+    "grand=\"import time,sys\\ntime.sleep(20)\\nopen(sys.argv[1],'w').write('x')\\n\"\n"
+    "marker=os.path.join(out_dir,'survivor_finished.txt')\n"
+    "p=subprocess.Popen([sys.executable,'-c',grand,marker])\n"
+    "open(os.path.join(out_dir,'survivor.pid'),'w',encoding='utf-8').write(str(p.pid))\n"
+    "print('ran:'+str(case.get('id','')))\n"
+)
+
+
+def _survivor_pid(exp):
+    p = exp / "evidence" / "raw" / "runtime-a" / "case-001" / "survivor.pid"
+    return int(p.read_text(encoding="utf-8").strip()) if p.exists() else None
+
+
+def _alive(pid):
+    if pid is None:
+        return False
+    try:
+        os.kill(pid, 0)  # POSIX: signal 0 just probes existence
+        return True
+    except OSError:
+        return False
+
+
+def _kill(pid):
+    if pid is None:
+        return
+    try:
+        if hasattr(os, "killpg"):
+            os.kill(pid, signal.SIGKILL)
+        else:
+            subprocess.run(["taskkill", "/F", "/PID", str(pid)],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                           timeout=5, check=False)
+    except OSError:
+        pass
 
 
 @contextmanager
@@ -240,6 +288,49 @@ class TestAutoScript(unittest.TestCase):
             self.assertEqual(rc, 0)
             self.assertLess(elapsed, 25, "script timeout must be bounded, not wait the full sleep")
             self.assertIn("connector_failure", _issue_types(ws / "experiments" / "demo"))
+
+
+class TestAutoScriptProcessHygiene(unittest.TestCase):
+    """Canonical-hang regression. A worker the script backgrounds inherits the
+    direct child's stdout/stderr; the run must finish on the DIRECT child's exit
+    (never wait on pipe-EOF) and must not leave that worker running. Fails on the
+    old PIPE+communicate path; passes with file-redirected stdout + proc.wait +
+    process-group sweep."""
+
+    def test_backgrounded_worker_does_not_hang_or_misclassify(self):
+        with _workspace() as ws:
+            exp = _setup(ws, connector="script", agent=_SCRIPT_BG_SURVIVOR,
+                         required_artifact=False, timeout=20)
+            t0 = time.monotonic()
+            try:
+                rc, _, _ = _run_cli(["run", "experiments/demo"])
+                elapsed = time.monotonic() - t0
+                self.assertEqual(rc, 0)
+                # must return on the direct child's exit (~instant), NOT wait the
+                # 20s worker holding the inherited stdout/stderr (old: ~timeout).
+                self.assertLess(elapsed, 15,
+                                "run parked on pipe-EOF held by a backgrounded worker (the hang)")
+                rec = json.loads((exp / "evidence" / "traces" / "runtime-a.jsonl")
+                                 .read_text(encoding="utf-8").splitlines()[0])
+                self.assertTrue(rec["ok"])  # direct child exited 0 → not a false timeout
+                self.assertNotIn("connector_failure", _issue_types(exp))
+            finally:
+                _kill(_survivor_pid(exp))  # release inherited handles for cleanup
+
+    @unittest.skipUnless(hasattr(os, "killpg"), "process-group reaping is POSIX-only")
+    def test_backgrounded_worker_is_reaped(self):
+        with _workspace() as ws:
+            exp = _setup(ws, connector="script", agent=_SCRIPT_BG_SURVIVOR,
+                         required_artifact=False, timeout=20)
+            _run_cli(["run", "experiments/demo"])
+            pid = _survivor_pid(exp)
+            self.assertIsNotNone(pid, "script did not record the worker pid")
+            deadline = time.monotonic() + 2  # allow a beat for SIGKILL + reap
+            while _alive(pid) and time.monotonic() < deadline:
+                time.sleep(0.05)
+            still = _alive(pid)
+            _kill(pid)  # belt-and-suspenders if the assertion is about to fail
+            self.assertFalse(still, "backgrounded worker was not reaped (leftover process)")
 
 
 class TestAutoArtifactIsolation(unittest.TestCase):

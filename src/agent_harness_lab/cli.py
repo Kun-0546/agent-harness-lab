@@ -13,6 +13,7 @@ CopilotTaskRenderer, ReportBuilder are not built yet).
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -183,7 +184,19 @@ def cmd_run(args: argparse.Namespace) -> int:
         # Auto Mode: AHL drives the runtimes via connectors and collects evidence.
         if report.verdict == WARN:
             _print_review(report)  # non-blocking, but surface for transparency
-        from agent_harness_lab import auto
+        from agent_harness_lab import auto, evaluation, inspector
+        # Auto Mode = Auto Run + Auto Optimize. If optimization is enabled, run the
+        # bounded candidate→evaluate→promote loop (each iteration is an Auto Run).
+        if spec.optimization and spec.optimization.enabled:
+            from agent_harness_lab import auto_optimize
+            opt_res = auto_optimize.run_optimization(exp_dir, spec)
+            print("Auto Optimize (run.mode=auto, optimization.enabled):")
+            print(f"  - {len(opt_res.iterations)} iteration(s), {opt_res.promotions} promotion(s); "
+                  f"stopped by {opt_res.stopped_by}")
+            print(f"  - incumbent harness: {opt_res.incumbent_dir}")
+            print(f"  - history: {exp_dir / 'optimization' / 'history.jsonl'}")
+            print(f"  - generate the report with: hlab report {args.experiment}")
+            return 0
         res = auto.run_auto(exp_dir, spec)
         print(f"Auto Mode (run.mode=auto, execution.mode={spec.execution_mode}):")
         print(f"  - dispatched {res.dispatched} case run(s) "
@@ -192,7 +205,21 @@ def cmd_run(args: argparse.Namespace) -> int:
         print(f"  - traces: {res.traces_written}  |  issues: {len(res.issues)}", end="")
         counts = res.issue_counts()
         print(f"  {counts}" if counts else "")
-        print("  - no report was generated (ReportBuilder is a later phase)")
+        # Evaluation: run each track's evaluators over the evidence just collected.
+        ev_result = (evaluation.run_evaluation(exp_dir, spec)
+                     if spec.evaluators else evaluation.EvaluationResult())
+        if ev_result.ran:
+            print(f"  - evaluation: {len(ev_result.tracks)} track(s) {ev_result.status_counts()}")
+            if ev_result.objective_track:
+                print(f"    objective primary track '{ev_result.objective_track}': "
+                      f"{ev_result.objective_status}")
+        else:
+            print("  - evaluation: no tracks configured (nothing evaluated)")
+        # Inspection: completeness checks over the evidence + scores (merges issues).
+        insp = inspector.run_inspection(exp_dir, spec)
+        print(f"  - inspection: +{len(insp.added)} issue(s) → {insp.issue_total} total "
+              f"{insp.severity_counts()}")
+        print(f"  - generate the report with: hlab report {args.experiment}")
         return 0
 
     # Any other run.mode is not executable in v1.
@@ -283,6 +310,17 @@ def cmd_status(args: argparse.Namespace) -> int:
     print(f"collection:      {coll_str}")
     print(f"inspection:      {insp_str}")
     print(f"evidence:        {', '.join(evidence_has) if evidence_has else 'none collected'}")
+    # evaluation: reflect aggregated per-track statuses written by EvaluationRunner
+    tracks_dir = evidence_dir / "scores" / "tracks"
+    eval_bits = []
+    if tracks_dir.is_dir():
+        for p in sorted(tracks_dir.glob("*.json")):
+            try:
+                d = json.loads(p.read_text(encoding="utf-8"))
+                eval_bits.append(f"{d.get('track_id')}={d.get('status')}")
+            except (OSError, json.JSONDecodeError):
+                continue
+    print(f"evaluation:      {', '.join(eval_bits) if eval_bits else 'none run'}")
     print(f"issues:          {issue_count}")
     print(f"report:          {'reports/report.md present' if report_md else 'none'}")
     print(f"conclusion:      {'present' if conclusion else 'missing'}")
@@ -302,13 +340,22 @@ def cmd_report(args: argparse.Namespace) -> int:
               f"fix them first (`hlab review {args.experiment}`).", file=sys.stderr)
         _print_review(report)
         return 1
-    # Phase 1 does not generate reports. Exit 2 = not implemented in this phase.
-    print(f"report: {exp_dir}", file=sys.stderr)
-    print("NOT IMPLEMENTED in this phase:", file=sys.stderr)
-    print("  - no report was generated", file=sys.stderr)
-    print("  (ReportBuilder — reports/report.md and reports/report.html — "
-          "lands in a later phase.)", file=sys.stderr)
-    return 2
+    try:
+        spec = parse_experiment_yaml(exp_dir / "experiment.yaml")
+    except ExperimentSpecError as e:
+        print(str(e), file=sys.stderr)
+        return 1
+    if report.verdict == WARN:
+        _print_review(report)  # non-blocking, but surface for transparency
+    from agent_harness_lab import report_builder
+    md_path = report_builder.build_report(exp_dir, spec)
+    print(f"report generated: {md_path}")
+    print("  - summarizes harnesses, runtimes, evidence, issues, evaluation tracks, "
+          "objective, and Auto Optimize state")
+    print("  - pending llm_judge/human evaluations and an unrun Auto Optimize loop are "
+          "marked honestly; no conclusion is fabricated")
+    print(f"Next: review it, then write your decision in conclusion.md.")
+    return 0
 
 
 # --- parser / entry ----------------------------------------------------------
