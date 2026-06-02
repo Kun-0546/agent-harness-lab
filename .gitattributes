@@ -1,0 +1,7 @@
+# Shell scripts must stay LF so they run on Linux/CI regardless of the author's OS.
+*.sh text eol=lf
+
+# Internal-only material: keep in the repo for reference, but exclude it from
+# release archives (`git archive` / GitHub release tarballs).
+docs/archive/internal/ export-ignore
+temp/ export-ignore
