@@ -17,6 +17,7 @@
 """
 import faulthandler
 import os
+import tempfile
 
 os.environ.setdefault("AHL_AGENT_TIMEOUT", "30")
 os.environ.setdefault("AHL_GIT_TIMEOUT", "30")
@@ -39,5 +40,14 @@ try:
 except ValueError:
     _SELF_DIAG = 90.0
 if _SELF_DIAG > 0:
-    # repeat=True: keep dumping every interval while hung (before the 300s CI kill).
-    faulthandler.dump_traceback_later(_SELF_DIAG, repeat=True)
+    # Dump every interval while hung. Default to a FILE — stderr dumps were not visible
+    # in a reviewer container — so a residual hang always leaves a capturable trace at
+    # AHL_TEST_HANG_DUMP_FILE (default: <tempdir>/ahl_test_hang_dump.txt). A normal run
+    # cancels the timer at exit and leaves the file empty.
+    _dump_path = os.environ.get("AHL_TEST_HANG_DUMP_FILE") or os.path.join(
+        tempfile.gettempdir(), "ahl_test_hang_dump.txt")
+    try:
+        _dump_file = open(_dump_path, "w", encoding="utf-8")  # kept open for the timer
+        faulthandler.dump_traceback_later(_SELF_DIAG, repeat=True, file=_dump_file)
+    except OSError:
+        faulthandler.dump_traceback_later(_SELF_DIAG, repeat=True)

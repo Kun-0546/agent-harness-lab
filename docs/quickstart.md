@@ -5,7 +5,8 @@ local and deterministic — no network, no API keys, no LLM.
 
 ## Prerequisites
 
-- Python 3.10+
+- Python 3.10–3.12 (Python 3.13 is not yet supported — pinned out pending an
+  unresolved test-suite hang)
 - PyYAML (installed automatically by `pip install -e .`)
 - A `python3` on your PATH for the example runtimes (on Windows without `python3`,
   edit the example's `command:` to `py agent.py` or `python agent.py`).

@@ -114,7 +114,10 @@ v1 的权威约定都在 [`docs/v1-spec/`](docs/v1-spec/)：
 
 ## 环境要求
 
-Python 3.10+，仅一个依赖 **PyYAML**。本地运行；核心流程和自带样例都不需要网络。
+Python **3.10–3.12**，仅一个依赖 **PyYAML**。本地运行；核心流程和自带样例都不需要网络。
+
+> **暂不支持 Python 3.13。** 有 reviewer 在 3.13.5 上报告了无法稳定复现/修复的测试套件挂起，
+> 因此 3.13 被 pin 掉（`requires-python = ">=3.10,<3.13"`），待解决后再开。请用 3.10–3.12 解释器。
 
 ```bash
 git clone https://github.com/Kun-0546/agent-harness-lab.git

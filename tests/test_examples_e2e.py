@@ -59,7 +59,13 @@ class TestAutoRunExample(unittest.TestCase):
         with _example_copy("auto-run-local-cli-lite") as root:
             exp = root / "experiments" / "demo"
             self.assertEqual(_run(["review", "experiments/demo"])[0], 0)  # WARN-only → exit 0
-            self.assertEqual(_run(["run", "experiments/demo"])[0], 0)
+            rc, out = _run(["run", "experiments/demo"])
+            self.assertEqual(rc, 0)
+            # run summary must read the A/B result as a comparison, never "failed"
+            self.assertNotIn("objective primary track 'quality': failed", out)
+            self.assertNotIn("{'failed': 1}", out)
+            self.assertIn("comparative", out)
+            self.assertIn("winner B", out)
             # both harnesses produced complete evidence (traces / raw / artifact)
             for rt in ("runtime-a", "runtime-b"):
                 self.assertTrue((exp / "evidence" / "traces" / f"{rt}.jsonl").is_file())

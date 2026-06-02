@@ -209,10 +209,27 @@ def cmd_run(args: argparse.Namespace) -> int:
         ev_result = (evaluation.run_evaluation(exp_dir, spec)
                      if spec.evaluators else evaluation.EvaluationResult())
         if ev_result.ran:
-            print(f"  - evaluation: {len(ev_result.tracks)} track(s) {ev_result.status_counts()}")
-            if ev_result.objective_track:
-                print(f"    objective primary track '{ev_result.objective_track}': "
-                      f"{ev_result.objective_status}")
+            from agent_harness_lab import report_builder
+            comp = report_builder.comparative_summary(exp_dir, spec)
+            if comp:
+                # multi-harness A/B: a comparison with a winner, not a "failed" track
+                display: dict[str, int] = {}
+                for t in ev_result.tracks:
+                    st = "comparative" if t.track_id == comp["primary"] else t.status
+                    display[st] = display.get(st, 0) + 1
+                print(f"  - evaluation: {len(ev_result.tracks)} track(s) {display}")
+                if comp["winner"]:
+                    met = "objective met" if comp["objective_met"] else "objective not met"
+                    print(f"    objective primary track '{comp['primary']}': comparative — "
+                          f"winner {comp['winner']} ({comp['winner_name']}), {met}")
+                else:
+                    print(f"    objective primary track '{comp['primary']}': comparative — "
+                          f"no single winner")
+            else:
+                print(f"  - evaluation: {len(ev_result.tracks)} track(s) {ev_result.status_counts()}")
+                if ev_result.objective_track:
+                    print(f"    objective primary track '{ev_result.objective_track}': "
+                          f"{ev_result.objective_status}")
         else:
             print("  - evaluation: no tracks configured (nothing evaluated)")
         # Inspection: completeness checks over the evidence + scores (merges issues).
@@ -312,14 +329,21 @@ def cmd_status(args: argparse.Namespace) -> int:
     print(f"evidence:        {', '.join(evidence_has) if evidence_has else 'none collected'}")
     # evaluation: reflect aggregated per-track statuses written by EvaluationRunner
     tracks_dir = evidence_dir / "scores" / "tracks"
+    from agent_harness_lab import report_builder
+    _comp = report_builder.comparative_summary(exp_dir, spec)
     eval_bits = []
     if tracks_dir.is_dir():
         for p in sorted(tracks_dir.glob("*.json")):
             try:
                 d = json.loads(p.read_text(encoding="utf-8"))
-                eval_bits.append(f"{d.get('track_id')}={d.get('status')}")
             except (OSError, json.JSONDecodeError):
                 continue
+            tid = d.get("track_id")
+            if _comp and tid == _comp["primary"]:
+                w = f" (winner {_comp['winner']})" if _comp.get("winner") else ""
+                eval_bits.append(f"{tid}=comparative{w}")
+            else:
+                eval_bits.append(f"{tid}={d.get('status')}")
     print(f"evaluation:      {', '.join(eval_bits) if eval_bits else 'none run'}")
     print(f"issues:          {issue_count}")
     print(f"report:          {'reports/report.md present' if report_md else 'none'}")

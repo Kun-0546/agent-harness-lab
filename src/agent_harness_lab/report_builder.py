@@ -131,6 +131,31 @@ def _load_cases_safe(exp_dir: Path, spec: ExperimentSpec) -> list[dict]:
     return []
 
 
+def comparative_summary(exp_dir: Path, spec: ExperimentSpec) -> dict | None:
+    """For a multi-harness A/B benchmark run, the comparative verdict; else None.
+
+    Shared by `hlab run` / `hlab status` so their summaries match the report — a
+    multi-harness run is a COMPARISON with a winner, not a "failed" track. Returns
+    {primary, winner, winner_name, best_passed, best_total, objective_met} or None
+    when fewer than two harnesses have per-harness scores.
+    """
+    evidence_dir = Path(exp_dir) / "evidence"
+    primary = _primary_track_id(spec)
+    hscores = _harness_scores(_read_records(evidence_dir, primary))
+    if len(hscores) < 2:
+        return None
+    winner = _winner(hscores)
+    name_of = {h.id: h.name for h in spec.harnesses}
+    out: dict = {"primary": primary, "winner": winner,
+                 "winner_name": (name_of.get(winner, winner) if winner else None),
+                 "objective_met": False}
+    if winner:
+        s = hscores[winner]
+        out["best_passed"], out["best_total"] = s["passed"], s["total"]
+        out["objective_met"] = bool(s["total"] and s["passed"] == s["total"])
+    return out
+
+
 def _build_markdown(exp_dir: Path, spec: ExperimentSpec) -> str:
     evidence_dir = exp_dir / "evidence"
     tracks_dir = evidence_dir / "scores" / "tracks"

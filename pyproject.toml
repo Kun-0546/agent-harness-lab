@@ -2,7 +2,10 @@
 name = "agent-harness-lab"
 version = "1.0.0.dev0"
 description = "Run goal-driven harness experiments on real Agent Runtimes."
-requires-python = ">=3.10"
+# Python 3.13 is NOT yet supported: a reviewer reported an intermittent test-suite
+# hang on 3.13.5 that could not be reproduced or fixed with confidence. Pinned out
+# until it is resolved and verified on a 3.13.x environment.
+requires-python = ">=3.10,<3.13"
 dependencies = [
   "pyyaml>=6.0",
 ]
@@ -31,7 +34,6 @@ classifiers = [
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
-  "Programming Language :: Python :: 3.13",
   "Topic :: Scientific/Engineering :: Artificial Intelligence",
   "Topic :: Software Development :: Testing",
   "Typing :: Typed",

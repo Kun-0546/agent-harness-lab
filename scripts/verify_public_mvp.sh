@@ -19,6 +19,14 @@ echo "repo:   $ROOT"
 echo "python: $("$PY" --version 2>&1)"
 command -v python3 >/dev/null 2>&1 || fail "python3 not on PATH (examples' local_cli connector requires it)"
 
+# Supported interpreter range is 3.10–3.12. Python 3.13 is pinned out (an unresolved
+# test-suite hang); fail fast with a clear message instead of hanging there.
+ver=$("$PY" -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null)
+case "$ver" in
+  3.10|3.11|3.12) : ;;
+  *) fail "unsupported Python $ver — AHL v1 supports 3.10–3.12 (run with PYTHON=python3.12)";;
+esac
+
 # 1. Full unit-test suite (committed tests; no network).
 echo "--- [1/5] unit tests: python -m unittest discover -s tests -t . ---"
 PYTHONPATH=src "$PY" -m unittest discover -s tests -t . >/tmp/ahl_verify_tests.log 2>&1 \

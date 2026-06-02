@@ -195,6 +195,10 @@ def _sweep_group(proc: "subprocess.Popen", pgid: int | None) -> None:
     Idempotent and never raises.
     """
     try:
+        # killpg the WHOLE group unconditionally — even after the direct child has
+        # exited, a worker it backgrounded can still be alive in the group, and that
+        # is exactly what this sweep must reap. (Do NOT guard on proc.poll(): the
+        # leader is often already gone here by design.)
         if _POSIX and pgid is not None:
             try:
                 os.killpg(pgid, signal.SIGKILL)

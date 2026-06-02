@@ -129,8 +129,12 @@ The authoritative v1 contracts live in [`docs/v1-spec/`](docs/v1-spec/):
 
 ## Requirements
 
-Python 3.10+ and a single dependency, **PyYAML**. Runs locally; the core workflow and
-the shipped examples need no network.
+Python **3.10–3.12** and a single dependency, **PyYAML**. Runs locally; the core
+workflow and the shipped examples need no network.
+
+> **Python 3.13 is not yet supported.** A reviewer reported an intermittent test-suite
+> hang on 3.13.5 that we could not reproduce or fix with confidence, so 3.13 is pinned
+> out (`requires-python = ">=3.10,<3.13"`) until it is resolved. Use a 3.10–3.12 interpreter.
 
 ```bash
 git clone https://github.com/Kun-0546/agent-harness-lab.git
