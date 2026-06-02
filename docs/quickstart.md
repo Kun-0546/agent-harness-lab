@@ -27,9 +27,10 @@ hlab report <experiment>   build reports/report.md from the evidence
 
 `hlab <cmd>` and `python -m agent_harness_lab <cmd>` are equivalent.
 
-## Run the Auto Run example
+## Run the Auto Run example (A/B: verbose vs concise)
 
-A single `local_cli` harness driven over two cases, with a benchmark evaluator.
+Two harnesses answer the same FAQ cases; a deterministic benchmark scores each on
+correctness + conciseness; the report compares them and names a winner.
 
 ```bash
 cd examples/auto-run-local-cli-lite
@@ -38,21 +39,27 @@ PYTHONPATH=../../src python -m agent_harness_lab run    experiments/demo
 PYTHONPATH=../../src python -m agent_harness_lab report experiments/demo
 ```
 
-`run` dispatches both cases, collects evidence, then runs evaluation + inspection:
+`run` dispatches 3 cases × 2 harnesses, collects evidence, then runs evaluation +
+inspection. The benchmark passes an answer only if it contains the required key term,
+stays within the length budget, and uses minimal filler — so **`verbose baseline` (A)
+fails every case and `concise alternative` (B) passes every case**.
+
+Open `experiments/demo/reports/report.md` to read, end to end:
 
 ```text
-experiments/demo/evidence/
-├── traces/runtime-a.jsonl          # one record per case
-├── raw/runtime-a/{c1,c2}.{out,err}
-├── artifacts/runtime-a/<case>/produced/out.txt
-├── scores/quality/e1.jsonl         # benchmark verdict
-├── scores/tracks/quality.json      # aggregated track status (passed)
-└── issues.jsonl                    # empty on the happy path
+Harness comparison   A (verbose baseline)    0/3   score 0.00
+                     B (concise alternative) 3/3   score 1.00   <- Winner
+Cases                the 3 FAQ questions and their key terms
+Evidence             per harness: traces / raw / artifacts
+Artifacts            the produced/answer.txt collected for each
+Issues               none on the happy path
+Objective            met by the best harness (B)
+Recommendation       B is stronger; a human decides in conclusion.md
 ```
 
-`report` writes `experiments/demo/reports/report.md`. (`review` prints a
-`conclusion_missing` WARN — that is expected; you write `conclusion.md` once you've
-read the report.)
+(`review` prints a `conclusion_missing` WARN — expected; you write `conclusion.md`
+after reading the report. The `quality` track aggregates to `failed` because not every
+harness passes — normal for an A/B run; the per-harness comparison is the signal.)
 
 ## Run the Auto Optimize example (bounded, deterministic)
 

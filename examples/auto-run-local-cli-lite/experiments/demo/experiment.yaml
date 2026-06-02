@@ -1,23 +1,30 @@
-# Auto Run example — one local_cli harness, two cases.
-# Run it:  hlab review experiments/demo  →  hlab run experiments/demo  →  hlab report experiments/demo
-# (see ../../README.md for the exact module-form commands)
+# Auto Run A/B example — two harnesses answer the same FAQ cases; a deterministic
+# benchmark scores each on correctness + conciseness. This is plain Auto Run (no
+# optimization): you compare A vs B, you do not iterate them.
+# Run: hlab review experiments/demo → hlab run experiments/demo → hlab report experiments/demo
 id: demo
 status: draft
 goal_ref: ../../goal.md
-question: "Does the base harness echo each case and leave its produced/ artifact?"
+question: "Which harness answers the FAQ correctly while staying concise (within the length budget, with minimal filler)?"
 run:
   mode: auto
 execution:
   mode: ab
   state_policy: isolated
 harnesses:
-  - id: base
-    name: base-echo
-    path: harnesses/base/
+  - id: A
+    name: verbose baseline
+    path: harnesses/A/
+  - id: B
+    name: concise alternative
+    path: harnesses/B/
 agent_runtimes:
   - id: runtime-a
-    harness: base
+    harness: A
     spec: agent-runtimes/runtime-a.yaml
+  - id: runtime-b
+    harness: B
+    spec: agent-runtimes/runtime-b.yaml
 cases:
   root: cases/
   files:
@@ -25,15 +32,16 @@ cases:
 evaluation:
   root: evaluation/
   evaluators:
-    - id: e1
+    - id: conciseness
       method: benchmark
-      script: benchmarks/score.py
+      script: benchmarks/concise_faq.py
   tracks:
     - id: quality
-      evaluators: [e1]
+      evaluators: [conciseness]
       evidence: [traces]
 objective:
   primary_track: quality
+  success_criteria: "answer contains the required key term, stays within the length budget, and uses minimal filler"
   optimize_for: maximize
 collection:
   traces: true

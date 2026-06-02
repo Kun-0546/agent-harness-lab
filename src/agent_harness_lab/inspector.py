@@ -8,6 +8,9 @@ evidence/inspections/inspection.json.
 Checks added by the Inspector (connector_failure / case_failure / empty_output /
 missing_artifact are already written by the AutoRunner — we dedupe against them):
   missing_trace    — a runtime produced fewer traces than there are cases
+  case_coverage    — a SPECIFIC declared case has no trace record for a runtime
+  missing_raw      — a trace record exists but its raw stdout was not captured
+  empty_artifact   — a collected artifact file exists but is 0 bytes
   missing_score    — a configured track has no aggregated score, or it errored
   runtime_mismatch — a trace's runtime/harness is not in the experiment's mapping
   path_drift       — an artifacts.collect glob escapes the runtime working dir
@@ -163,6 +166,39 @@ def run_inspection(exp_dir: Path, spec: ExperimentSpec, *,
                 add("runtime_mismatch",
                     f"runtime {tr_rt}: trace harness {tr_h!r} != declared {rt_harness.get(tr_rt)!r}",
                     WARN, runtime_id=tr_rt, case_id=r.get("case_id"), harness_id=tr_h)
+        # case_coverage: which SPECIFIC declared cases have no trace for this runtime
+        # (missing_trace is the count-level signal; this names the exact gaps).
+        if n_cases and rt_ref.id not in failed_rt:
+            traced = {r.get("case_id") for r in recs}
+            for idx, case in enumerate(cases):
+                cid = _case_id(case, idx)
+                if cid not in traced:
+                    add("case_coverage",
+                        f"runtime {rt_ref.id}: case {cid} has no trace record",
+                        WARN, runtime_id=rt_ref.id, case_id=cid, harness_id=rt_ref.harness,
+                        evidence_ref=f"evidence/traces/{rt_ref.id}.jsonl")
+        # missing_raw: a trace record exists but its raw stdout was not captured
+        for r in recs:
+            cid = r.get("case_id")
+            if not isinstance(cid, str) or not cid:
+                continue
+            if not (evidence_dir / "raw" / rt_ref.id / f"{cid}.out").is_file():
+                add("missing_raw",
+                    f"runtime {rt_ref.id} case {cid}: no raw output captured",
+                    WARN, runtime_id=rt_ref.id, case_id=cid, harness_id=rt_ref.harness,
+                    evidence_ref=f"evidence/raw/{rt_ref.id}/{cid}.out")
+        # empty_artifact: a collected artifact file exists but is 0 bytes
+        rt_art = artifacts_dir / rt_ref.id
+        if rt_art.is_dir():
+            for f in sorted(rt_art.rglob("*")):
+                if f.is_file() and f.stat().st_size == 0:
+                    parts = f.relative_to(rt_art).parts
+                    cid = parts[0] if parts else None
+                    rel = f.relative_to(artifacts_dir).as_posix()
+                    add("empty_artifact",
+                        f"runtime {rt_ref.id}: collected artifact {rel} is empty (0 bytes)",
+                        WARN, runtime_id=rt_ref.id, case_id=cid, harness_id=rt_ref.harness,
+                        evidence_ref=f"evidence/artifacts/{rel}")
         # path_drift + missing_artifact need the runtime's artifact rules
         rt = None
         if isinstance(rt_ref.spec, str) and rt_ref.spec:

@@ -1,6 +1,10 @@
-# Goal — the runtime handles each case deterministically and leaves evidence
+# Goal — answer the FAQ correctly while staying concise
 
-This tiny workspace exists to demonstrate the v1 **Auto Run** pipeline end to end
-(dispatch → evidence → evaluation → report). The "agent" is a deterministic echo,
-so there is nothing to discover here — the point is to show what AHL produces when
-it drives a `local_cli` runtime over a set of cases. No network, no external APIs.
+A good support answer is both *correct* (it contains the key information) and
+*concise* (short, direct, low on filler). This workspace compares two harnesses on
+that goal — a `verbose baseline` and a `concise alternative` — over the same FAQ
+cases.
+
+It is a complete v1 **Auto Run A/B** demo: local, deterministic, no network. The
+point is to show what AHL produces end to end when it drives and scores two harnesses
+on the same cases, and how the report makes the comparison readable.

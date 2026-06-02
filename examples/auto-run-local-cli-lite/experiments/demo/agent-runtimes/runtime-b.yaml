@@ -1,0 +1,11 @@
+id: runtime-b
+connector:
+  type: local_cli
+  command: python3 agent.py
+  working_dir: ./harnesses/B
+  timeout: 30
+artifacts:
+  collect:
+    - id: answer
+      glob: "produced/**"
+      required: false

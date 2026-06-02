@@ -181,7 +181,8 @@ def _run_benchmark(ev: EvaluatorSpec, track_id: str, exp_dir: Path,
                 records.append({"track_id": track_id, "evaluator_id": ev.id, "method": ev.method,
                                 "status": PASSED if r.get("passed") else FAILED,
                                 "score": r.get("score"), "detail": str(r.get("detail", "")),
-                                "case_id": r.get("case_id"), "created_by": "EvaluationRunner"})
+                                "case_id": r.get("case_id"), "harness_id": r.get("harness_id"),
+                                "created_by": "EvaluationRunner"})
     elif isinstance(parsed, dict) and "passed" in parsed:
         out.status = PASSED if parsed.get("passed") else FAILED
         out.score = parsed.get("score") if isinstance(parsed.get("score"), (int, float)) else None

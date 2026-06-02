@@ -55,21 +55,35 @@ def _run(args):
 
 
 class TestAutoRunExample(unittest.TestCase):
-    def test_review_run_report_produces_evidence(self):
+    def test_ab_run_scores_concise_over_verbose(self):
         with _example_copy("auto-run-local-cli-lite") as root:
             exp = root / "experiments" / "demo"
             self.assertEqual(_run(["review", "experiments/demo"])[0], 0)  # WARN-only → exit 0
-            rc, out = _run(["run", "experiments/demo"])
-            self.assertEqual(rc, 0)
-            self.assertTrue((exp / "evidence" / "traces" / "runtime-a.jsonl").is_file())
-            self.assertTrue((exp / "evidence" / "raw" / "runtime-a" / "c1.out").is_file())
-            self.assertTrue((exp / "evidence" / "artifacts" / "runtime-a" / "c1"
-                             / "produced" / "out.txt").is_file())
-            self.assertTrue((exp / "evidence" / "scores" / "tracks" / "quality.json").is_file())
+            self.assertEqual(_run(["run", "experiments/demo"])[0], 0)
+            # both harnesses produced complete evidence (traces / raw / artifact)
+            for rt in ("runtime-a", "runtime-b"):
+                self.assertTrue((exp / "evidence" / "traces" / f"{rt}.jsonl").is_file())
+                self.assertTrue((exp / "evidence" / "raw" / rt / "faq-reset.out").is_file())
+                self.assertTrue((exp / "evidence" / "artifacts" / rt / "faq-reset"
+                                 / "produced" / "answer.txt").is_file())
             self.assertTrue((exp / "evidence" / "issues.jsonl").is_file())
-            self.assertIn("objective primary track 'quality': passed", out)
+            # per-harness benchmark: verbose A fails every case, concise B passes every case
+            recs = [json.loads(ln) for ln in (exp / "evidence" / "scores" / "quality"
+                    / "conciseness.jsonl").read_text(encoding="utf-8").splitlines() if ln.strip()]
+            a = [r for r in recs if r["harness_id"] == "A"]
+            b = [r for r in recs if r["harness_id"] == "B"]
+            self.assertEqual(len(a), 3)
+            self.assertEqual(len(b), 3)
+            self.assertTrue(all(r["status"] == "failed" for r in a))
+            self.assertTrue(all(r["status"] == "passed" for r in b))
+            # report reads as an A/B comparison that names the winner
             self.assertEqual(_run(["report", "experiments/demo"])[0], 0)
-            self.assertTrue((exp / "reports" / "report.md").is_file())
+            report = (exp / "reports" / "report.md").read_text(encoding="utf-8")
+            self.assertIn("## Harness comparison", report)
+            self.assertIn("Winner (by `quality`): `B`", report)
+            self.assertIn("concise alternative", report)
+            self.assertIn("verbose baseline", report)
+            self.assertIn("Objective met:", report)
 
 
 class TestAutoOptimizeExample(unittest.TestCase):

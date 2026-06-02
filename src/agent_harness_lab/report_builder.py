@@ -21,6 +21,7 @@ from agent_harness_lab.experiment_spec import (
     ExperimentSpec,
     ExperimentSpecError,
     load_agent_runtime_spec,
+    load_cases,
 )
 
 
@@ -67,8 +68,79 @@ def _connector_type(exp_dir: Path, rt_ref) -> str:
     return "?"
 
 
+def _read_records(evidence_dir: Path, track_id: str | None) -> list[dict]:
+    """All per-evaluator score records for a track (across its evaluators)."""
+    recs: list[dict] = []
+    if not track_id:
+        return recs
+    d = evidence_dir / "scores" / track_id
+    if d.is_dir():
+        for p in sorted(d.glob("*.jsonl")):
+            recs.extend(_read_jsonl(p))
+    return recs
+
+
+def _harness_scores(records: list[dict]) -> dict[str, dict]:
+    """Group benchmark records by harness_id → {passed, total, mean}."""
+    out: dict[str, dict] = {}
+    for r in records:
+        hid = r.get("harness_id")
+        if hid is None:
+            continue
+        s = out.setdefault(hid, {"passed": 0, "total": 0, "_sum": 0.0, "_n": 0})
+        s["total"] += 1
+        if r.get("status") == "passed" or r.get("passed") is True:
+            s["passed"] += 1
+        if isinstance(r.get("score"), (int, float)):
+            s["_sum"] += float(r["score"])
+            s["_n"] += 1
+    for s in out.values():
+        s["mean"] = (s["_sum"] / s["_n"]) if s["_n"] else None
+    return out
+
+
+def _winner(hscores: dict[str, dict]) -> str | None:
+    """The harness strictly ahead by mean score then pass rate; None on tie/empty."""
+    if not hscores:
+        return None
+
+    def rank(hid):
+        s = hscores[hid]
+        mean = s["mean"] if s["mean"] is not None else -1.0
+        rate = (s["passed"] / s["total"]) if s["total"] else 0.0
+        return (mean, rate)
+
+    ordered = sorted(hscores, key=rank, reverse=True)
+    if len(ordered) == 1 or rank(ordered[0]) > rank(ordered[1]):
+        return ordered[0]
+    return None
+
+
+def _primary_track_id(spec: ExperimentSpec) -> str | None:
+    if spec.objective and spec.objective.primary_track:
+        return spec.objective.primary_track
+    return spec.tracks[0].id if spec.tracks else None
+
+
+def _load_cases_safe(exp_dir: Path, spec: ExperimentSpec) -> list[dict]:
+    try:
+        if spec.cases_root and spec.cases_files:
+            return load_cases(exp_dir / spec.cases_root, spec.cases_files)
+    except ExperimentSpecError:
+        pass
+    return []
+
+
 def _build_markdown(exp_dir: Path, spec: ExperimentSpec) -> str:
     evidence_dir = exp_dir / "evidence"
+    tracks_dir = evidence_dir / "scores" / "tracks"
+    primary = _primary_track_id(spec)
+    records = _read_records(evidence_dir, primary)
+    hscores = _harness_scores(records)
+    name_of = {h.id: h.name for h in spec.harnesses}
+    winner = _winner(hscores)
+    is_comparative = len(hscores) >= 2  # multi-harness A/B → a comparison, not pass/fail
+    cases = _load_cases_safe(exp_dir, spec)
     L: list[str] = []
     L.append(f"# Experiment Report: {spec.id or '(unset)'}")
     L.append("")
@@ -79,28 +151,79 @@ def _build_markdown(exp_dir: Path, spec: ExperimentSpec) -> str:
              f"(state_policy={spec.state_policy or '(unset)'})")
     L.append("")
 
-    L.append("## Harnesses")
-    if spec.harnesses:
+    # ---- Harness comparison (the A/B headline) ----
+    L.append("## Harness comparison")
+    if hscores:
+        L.append(f"Per-harness result on the **`{primary}`** benchmark track:")
+        L.append("")
+        L.append("| Harness | Name | Cases passed | Mean score |")
+        L.append("|---|---|---|---|")
         for h in spec.harnesses:
-            L.append(f"- `{h.id}` = {h.name} ({h.path})")
+            s = hscores.get(h.id)
+            if s:
+                mean = f"{s['mean']:.2f}" if s["mean"] is not None else "—"
+                L.append(f"| `{h.id}` | {h.name} | {s['passed']}/{s['total']} | {mean} |")
+            else:
+                L.append(f"| `{h.id}` | {h.name} | — | — |")
+        L.append("")
+        if winner:
+            L.append(f"**Winner (by `{primary}`): `{winner}` — {name_of.get(winner, winner)}.**")
+            for h in spec.harnesses:
+                if h.id == winner or h.id not in hscores:
+                    continue
+                reason = next((r.get("detail") for r in records
+                               if r.get("harness_id") == h.id and r.get("status") != "passed"
+                               and r.get("detail")), None)
+                if reason:
+                    L.append(f"- `{h.id}` ({h.name}) fell short — e.g. {reason}.")
+        else:
+            L.append(f"**No single winner on `{primary}` — the harnesses tie.**")
     else:
-        L.append("- (none)")
+        L.append("- No per-harness benchmark scores were produced "
+                 "(no benchmark evaluator emitted per-harness records).")
     L.append("")
 
-    L.append("## Agent runtimes")
+    # ---- Cases ----
+    L.append("## Cases")
+    if cases:
+        for c in cases:
+            cid = c.get("id", "(case)")
+            inp = c.get("input", "")
+            exp_kw = c.get("expect")
+            L.append(f"- `{cid}` — {inp}" + (f"  _(expect: `{exp_kw}`)_" if exp_kw else ""))
+    else:
+        L.append("- (no cases declared)")
+    L.append("")
+
+    # ---- Evidence (per runtime) ----
+    L.append("## Evidence")
     if spec.agent_runtimes:
         for r in spec.agent_runtimes:
-            L.append(f"- `{r.id}` → harness `{r.harness}` (connector: {_connector_type(exp_dir, r)})")
+            tr = _read_jsonl(evidence_dir / "traces" / f"{r.id}.jsonl")
+            raw_dir = evidence_dir / "raw" / r.id
+            n_raw = len(list(raw_dir.glob("*.out"))) if raw_dir.is_dir() else 0
+            art_dir = evidence_dir / "artifacts" / r.id
+            n_art = len([p for p in art_dir.rglob("*") if p.is_file()]) if art_dir.is_dir() else 0
+            L.append(f"- `{r.id}` (harness `{r.harness}`, connector "
+                     f"{_connector_type(exp_dir, r)}): {len(tr)} trace(s), "
+                     f"{n_raw} raw output(s), {n_art} artifact file(s)")
     else:
-        L.append("- (none)")
+        L.append("- (no agent runtimes)")
     L.append("")
 
-    runtimes, traces = _trace_counts(evidence_dir)
-    L.append("## Cases & evidence")
-    L.append(f"- **Traces:** {traces} record(s) across {runtimes} runtime(s)")
-    L.append(f"- **raw:** {'present' if _evidence_present(evidence_dir, 'raw') else 'none'}")
-    L.append(f"- **artifacts:** {'present' if _evidence_present(evidence_dir, 'artifacts') else 'none'}")
-    L.append(f"- **scores:** {'present' if _evidence_present(evidence_dir, 'scores') else 'none'}")
+    # ---- Artifacts ----
+    L.append("## Artifacts")
+    any_art = False
+    for r in spec.agent_runtimes:
+        art_dir = evidence_dir / "artifacts" / r.id
+        files = sorted(p for p in art_dir.rglob("*") if p.is_file()) if art_dir.is_dir() else []
+        if files:
+            any_art = True
+            sample = files[0].relative_to(evidence_dir).as_posix()
+            L.append(f"- `{r.id}` (harness `{r.harness}`): {len(files)} file(s) collected "
+                     f"— e.g. `{sample}`")
+    if not any_art:
+        L.append("- No artifacts collected.")
     L.append("")
 
     # Issues
@@ -142,11 +265,21 @@ def _build_markdown(exp_dir: Path, spec: ExperimentSpec) -> str:
                 continue
             status = d.get("status")
             any_pending = any_pending or status == "pending"
+            tid = d.get("track_id")
             q = f" — {d.get('question')}" if d.get("question") else ""
-            L.append(f"- **{d.get('track_id')}**: {status}{q}")
-            for e in d.get("evaluators", []):
-                L.append(f"    - `{e.get('evaluator_id')}` ({e.get('method')}): "
-                         f"{e.get('status')}" + (f" score={e.get('score')}" if e.get("score") is not None else ""))
+            if is_comparative and tid == primary:
+                # multi-harness A/B: the outcome is a comparison, not a single pass/fail
+                if winner:
+                    L.append(f"- **{tid}**: comparative — winner `{winner}` "
+                             f"({name_of.get(winner, winner)}){q}")
+                else:
+                    L.append(f"- **{tid}**: comparative — no single winner{q}")
+                L.append("    - per-harness scores; see **Harness comparison** above")
+            else:
+                L.append(f"- **{tid}**: {status}{q}")
+                for e in d.get("evaluators", []):
+                    L.append(f"    - `{e.get('evaluator_id')}` ({e.get('method')}): "
+                             f"{e.get('status')}" + (f" score={e.get('score')}" if e.get("score") is not None else ""))
     if any_pending:
         L.append("")
         L.append("> Some tracks are **pending**: `human_annotation` evaluators await an "
@@ -158,18 +291,48 @@ def _build_markdown(exp_dir: Path, spec: ExperimentSpec) -> str:
     L.append("## Objective")
     if spec.objective and spec.objective.primary_track:
         obj = spec.objective
-        prim_status = "(no score)"
-        agg = tracks_dir / f"{obj.primary_track}.json"
-        if agg.is_file():
-            try:
-                prim_status = json.loads(agg.read_text(encoding="utf-8")).get("status", "(no score)")
-            except (OSError, json.JSONDecodeError):
-                pass
-        L.append(f"- **Primary track:** `{obj.primary_track}` → **{prim_status}**")
+        L.append(f"- **Primary track:** `{obj.primary_track}`")
         if obj.success_criteria:
             L.append(f"- **Success criteria:** {obj.success_criteria}")
         if obj.optimize_for:
             L.append(f"- **Optimize for:** {obj.optimize_for}")
+        if is_comparative and winner:
+            # A/B: report a comparison with a clear winner — never a "failed" track.
+            ws = hscores[winner]
+            L.append("- **Track result:** comparative")
+            L.append(f"- **Winner:** `{winner}` — {name_of.get(winner, winner)}")
+            L.append(f"- **Best harness passed:** {ws['passed']}/{ws['total']}")
+            others = [h.id for h in spec.harnesses if h.id in hscores and h.id != winner]
+            for hid in others:
+                s = hscores[hid]
+                label = "Baseline passed" if len(others) == 1 else f"`{hid}` passed"
+                L.append(f"- **{label}:** {s['passed']}/{s['total']}")
+            if ws["total"] and ws["passed"] == ws["total"]:
+                L.append("- **Objective met:** yes, because the best harness satisfies the objective")
+            elif ws["passed"]:
+                L.append(f"- **Objective partially met:** the best harness satisfies the objective "
+                         f"on {ws['passed']}/{ws['total']} cases")
+            else:
+                L.append("- **Objective not met:** no harness satisfies the objective")
+        elif winner and hscores.get(winner):
+            s = hscores[winner]
+            if s["total"] and s["passed"] == s["total"]:
+                L.append(f"- **Objective met:** yes — harness `{winner}` "
+                         f"({name_of.get(winner, winner)}) passed {s['passed']}/{s['total']}.")
+            elif s["passed"]:
+                L.append(f"- **Objective partially met:** harness `{winner}` passed "
+                         f"{s['passed']}/{s['total']}.")
+            else:
+                L.append("- **Objective not met:** no case passed.")
+        else:
+            agg = tracks_dir / f"{obj.primary_track}.json"
+            st = "(no score)"
+            if agg.is_file():
+                try:
+                    st = json.loads(agg.read_text(encoding="utf-8")).get("status", st)
+                except (OSError, json.JSONDecodeError):
+                    pass
+            L.append(f"- **Primary track status:** {st}")
     else:
         L.append("- No objective defined.")
     L.append("")
@@ -206,15 +369,24 @@ def _build_markdown(exp_dir: Path, spec: ExperimentSpec) -> str:
              "script) — not a general AI self-improvement engine.")
     L.append("")
 
-    # Next step (never fabricate a conclusion)
-    L.append("## Next step")
+    # Recommendation (data-driven, but never the human's final conclusion)
+    L.append("## Recommendation")
+    if winner and primary:
+        L.append(f"Based on the `{primary}` benchmark track, Harness `{winner}` "
+                 f"({name_of.get(winner, winner)}) is stronger for this objective. A human "
+                 f"reviewer should inspect the evidence and decide whether to adopt it in "
+                 f"`conclusion.md`.")
+    else:
+        L.append("The benchmark did not single out a stronger harness. A human reviewer "
+                 "should inspect the evidence and record a decision in `conclusion.md`.")
+    L.append("")
     conclusion = exp_dir / "conclusion.md"
     if conclusion.is_file():
-        L.append("- A `conclusion.md` exists — confirm it reflects the evidence above.")
+        L.append("A `conclusion.md` exists — confirm it reflects the evidence above.")
     else:
-        L.append("- Write your decision in `conclusion.md` "
-                 "(Human conclusion / Rationale / Evidence relied on / Evidence not trusted / "
-                 "Next step). This report does **not** draw a conclusion for you.")
+        L.append("This report does **not** draw the conclusion for you. Write your decision "
+                 "in `conclusion.md` (Decision / Rationale / Evidence relied on / Evidence not "
+                 "trusted / Next step).")
     L.append("")
     return "\n".join(L)
 

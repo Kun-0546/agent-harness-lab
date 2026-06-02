@@ -1,2 +1,3 @@
-{"id": "c1", "input": "hi"}
-{"id": "c2", "input": "hello"}
+{"id": "faq-reset", "input": "How do I reset my password?", "expect": "reset"}
+{"id": "faq-hours", "input": "What are your support hours?", "expect": "24/7"}
+{"id": "faq-cancel", "input": "How do I cancel my subscription?", "expect": "cancel"}

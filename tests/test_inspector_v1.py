@@ -66,6 +66,48 @@ class TestInspectorChecks(unittest.TestCase):
             res = inspector.run_inspection(exp, _spec(exp))
             self.assertIn("missing_trace", _added_types(res))
 
+    def test_case_coverage_names_specific_missing_case(self):
+        with _workspace() as ws:
+            exp = _build(ws, cases='{"id":"c1"}\n{"id":"c2"}\n')
+            _trace(exp, {"case_id": "c1", "runtime_id": "runtime-a", "ok": True})  # c2 absent
+            res = inspector.run_inspection(exp, _spec(exp))
+            self.assertIn("case_coverage", _added_types(res))
+            cc = next(i for i in res.added if i["type"] == "case_coverage")
+            self.assertEqual(cc["case_id"], "c2")
+            self.assertEqual(cc["severity"], "warn")
+
+    def test_missing_raw_when_trace_has_no_raw_output(self):
+        with _workspace() as ws:
+            exp = _build(ws)
+            _trace(exp, {"case_id": "case-001", "runtime_id": "runtime-a", "ok": True})
+            # no evidence/raw/runtime-a/case-001.out written
+            res = inspector.run_inspection(exp, _spec(exp))
+            self.assertIn("missing_raw", _added_types(res))
+
+    def test_missing_raw_not_flagged_when_raw_present(self):
+        with _workspace() as ws:
+            exp = _build(ws)
+            _trace(exp, {"case_id": "case-001", "runtime_id": "runtime-a", "ok": True})
+            raw = exp / "evidence" / "raw" / "runtime-a"
+            raw.mkdir(parents=True, exist_ok=True)
+            (raw / "case-001.out").write_text("hello", encoding="utf-8")
+            res = inspector.run_inspection(exp, _spec(exp))
+            self.assertNotIn("missing_raw", _added_types(res))
+
+    def test_empty_artifact_when_collected_file_is_zero_bytes(self):
+        with _workspace() as ws:
+            exp = _build(ws)
+            _trace(exp, {"case_id": "case-001", "runtime_id": "runtime-a", "ok": True})
+            (exp / "evidence" / "raw" / "runtime-a").mkdir(parents=True, exist_ok=True)
+            (exp / "evidence" / "raw" / "runtime-a" / "case-001.out").write_text("x", encoding="utf-8")
+            art = exp / "evidence" / "artifacts" / "runtime-a" / "case-001" / "produced"
+            art.mkdir(parents=True, exist_ok=True)
+            (art / "answer.txt").write_text("", encoding="utf-8")  # 0 bytes
+            res = inspector.run_inspection(exp, _spec(exp))
+            self.assertIn("empty_artifact", _added_types(res))
+            ea = next(i for i in res.added if i["type"] == "empty_artifact")
+            self.assertEqual(ea["case_id"], "case-001")
+
     def test_runtime_mismatch_for_unknown_runtime(self):
         with _workspace() as ws:
             exp = _build(ws)
