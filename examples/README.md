@@ -18,9 +18,5 @@ PYTHONPATH=../../src python -m agent_harness_lab run    experiments/demo
 PYTHONPATH=../../src python -m agent_harness_lab report experiments/demo
 ```
 
-(The examples' runtime command is `python3 agent.py`; on Windows without `python3`,
-edit `command:` in `experiments/demo/agent-runtimes/runtime-a.yaml`.)
-
-> Older v0.10 examples — retired concepts such as `program.md` / `ahl` /
-> harness-packages — are archived under [`_legacy_v0.10/`](_legacy_v0.10/) and are
-> not maintained.
+(The examples' runtimes call `python3 agent.py`; on Windows without `python3`, edit
+`command:` in each `experiments/demo/agent-runtimes/runtime-*.yaml`.)

@@ -21,13 +21,23 @@ import os
 os.environ.setdefault("AHL_AGENT_TIMEOUT", "30")
 os.environ.setdefault("AHL_GIT_TIMEOUT", "30")
 os.environ.setdefault("AHL_CONNECTOR_TIMEOUT", "30")
+# Evaluation benchmark + Auto Optimize mutation subprocesses (product defaults 60s):
+# bound them too. Earlier these were unbounded in tests, so a stalled/starved
+# benchmark or mutation could run toward a 60s wall and stack across iterations —
+# the 3.13 reviewer-env "evaluation/benchmarks/b.py high CPU" report.
+os.environ.setdefault("AHL_EVAL_TIMEOUT", "30")
+os.environ.setdefault("AHL_OPTIMIZE_TIMEOUT", "30")
+os.environ.setdefault("AHL_AGENT_CLOSE_GRACE", "3")
 os.environ.setdefault("GIT_TERMINAL_PROMPT", "0")
 os.environ.setdefault("GCM_INTERACTIVE", "never")
 
 try:
-    _SELF_DIAG = float(os.environ.get("AHL_TEST_HANG_DUMP_SECONDS", "150"))
+    # 90s: fires a stack dump BEFORE a 120s targeted-combo timeout (the earlier 150s
+    # never fired under a 120s runner kill) and well below the 300s full-suite kill.
+    # A normal ~20s run cancels the timer on exit, so nothing prints.
+    _SELF_DIAG = float(os.environ.get("AHL_TEST_HANG_DUMP_SECONDS", "90"))
 except ValueError:
-    _SELF_DIAG = 150.0
+    _SELF_DIAG = 90.0
 if _SELF_DIAG > 0:
     # repeat=True: keep dumping every interval while hung (before the 300s CI kill).
     faulthandler.dump_traceback_later(_SELF_DIAG, repeat=True)

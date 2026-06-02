@@ -1,7 +1,17 @@
 # Shell scripts must stay LF so they run on Linux/CI regardless of the author's OS.
 *.sh text eol=lf
 
-# Internal-only material: keep in the repo for reference, but exclude it from
-# release archives (`git archive` / GitHub release tarballs).
-docs/archive/internal/ export-ignore
+# Archive + legacy material: kept in the repo for reference, but EXCLUDED from
+# release archives (`git archive` / GitHub release tarballs). These carry historical
+# local paths, private-workspace references, and temp review-bundle mentions that must
+# not be published — so the entire archive tree and the legacy examples are export-ignored.
+docs/archive/ export-ignore
+examples/_legacy_v0.10/ export-ignore
 temp/ export-ignore
+
+# CHANGELOG.md and CONTRIBUTING.md are still v0.10-era internal-process documents
+# (repo-visibility notes, freeze/lock cycle history, stale zero-deps / auto-mode
+# claims, links to archived files). Exclude them from release archives until they are
+# rewritten for the public v1 surface. They remain in the repo for reference.
+CHANGELOG.md export-ignore
+CONTRIBUTING.md export-ignore

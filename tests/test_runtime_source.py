@@ -37,7 +37,7 @@ class TestParseRuntimeSources(_MdCase):
             "ref: main\n\n"
             "## local-aider\n"
             "type: local_path\n"
-            "path: <home>/projects/aider\n"
+            "path: /tmp/aider-src\n"
         )
         sources = parse_runtime_sources(p)
         self.assertEqual(len(sources), 2)
@@ -49,7 +49,7 @@ class TestParseRuntimeSources(_MdCase):
         )
         self.assertEqual(by["openmanus-main"].config["ref"], "main")
         self.assertEqual(by["local-aider"].type, "local_path")
-        self.assertEqual(by["local-aider"].config["path"], "<home>/projects/aider")
+        self.assertEqual(by["local-aider"].config["path"], "/tmp/aider-src")
 
     def test_local_path_missing_path_caught_by_validate(self):
         """test 2a:local_path 缺 path → validate() 报问题(parse 不抛错)。"""

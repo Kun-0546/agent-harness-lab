@@ -8,13 +8,19 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      # Minimal 2-version matrix: 3.12 (known-good) + 3.13 (reviewer env / the version
+      # the subprocess-cleanup timeout fix targets). Not a broad OS/version sweep.
+      matrix:
+        python-version: ["3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
 
       - name: Install package
         run: pip install -e .

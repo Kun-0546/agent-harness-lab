@@ -219,6 +219,27 @@ class TestSessionTeardownReliability(unittest.TestCase):
         sess.close()  # second close must not raise
         self.assertIsNotNone(sess.proc.poll())
 
+    def test_repeated_flooders_all_reaped_and_bounded(self):
+        # Inter-test churn guard for the 3.13 reviewer-env report (leaked high-CPU
+        # `agent.py`): several stdout-flooding, stdin-ignoring children in a row must
+        # EACH be force-killed by close() with none surviving, in bounded time.
+        import time
+        (self.sandbox / "agent.py").write_text(
+            "import sys, time\n"
+            "while True:\n"
+            "    sys.stdout.write('x\\n'); sys.stdout.flush()\n"
+            "    time.sleep(0.002)\n", encoding="utf-8")
+        t0 = time.monotonic()
+        procs = []
+        for _ in range(3):
+            sess = _SandboxCliSession(self._cmd(), cwd=self.sandbox)
+            procs.append(sess.proc)
+            sess.close()
+        elapsed = time.monotonic() - t0
+        for p in procs:
+            self.assertIsNotNone(p.poll(), "a flooding child survived close()")
+        self.assertLess(elapsed, 20, f"3 flooder close()s took {elapsed:.1f}s — not bounded")
+
 
 if __name__ == "__main__":
     unittest.main()

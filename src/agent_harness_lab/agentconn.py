@@ -121,7 +121,13 @@ def _close_session(s: "AgentSession") -> None:
     try:
         s.proc.wait(timeout=_CLOSE_GRACE)
     except Exception:  # noqa: BLE001
-        _reap(s.proc, getattr(s, "_pgid", None))
+        pass
+    # ALWAYS force-kill the whole group, not only on a wait() timeout. _reap is
+    # idempotent (a no-op once the child has exited and poll() reaps it), so this is
+    # free on the clean-exit path but guarantees a stdin-ignoring / high-CPU child
+    # (and any group member) can never survive close() under timing/version
+    # differences where wait() returns ambiguously.
+    _reap(s.proc, getattr(s, "_pgid", None))
     for t in getattr(s, "_threads", ()):
         try:
             t.join(timeout=_CLOSE_GRACE)
