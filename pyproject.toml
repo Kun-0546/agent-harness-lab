@@ -43,7 +43,7 @@ classifiers = [
 Homepage = "https://github.com/Kun-0546/agent-harness-lab"
 Repository = "https://github.com/Kun-0546/agent-harness-lab"
 Issues = "https://github.com/Kun-0546/agent-harness-lab/issues"
-Changelog = "https://github.com/Kun-0546/agent-harness-lab/blob/main/CHANGELOG.md"
+Changelog = "https://github.com/Kun-0546/agent-harness-lab/releases"
 
 [project.scripts]
 hlab = "agent_harness_lab.cli:main"

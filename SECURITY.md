@@ -23,9 +23,8 @@ on severity:
 
 In-scope security issues include:
 
-- Path traversal in `materialize/` adapters or `patch.py` (current defenses:
-  `_safe_target_path` + `_safe_source_path`; see
-  `docs/runtime-materialization-m1-spec.md`).
+- Path traversal in file materialization or patch application (current defenses:
+  `_safe_target_path` + `_safe_source_path`).
 - Command injection in `agentconn.py` subprocess invocation
   (`_SandboxCliSession` uses `shell=False`; legacy `_CliSession` is documented).
 - Secrets leakage through logs, snapshots, or sandbox dirs.
@@ -33,8 +32,8 @@ In-scope security issues include:
 
 Out of scope:
 
-- User agents launched through `connect.md` or `runtime-sources.md`. Their
-  security is the user's responsibility; AHL is the harness, not the agent.
+- User agents and runtimes that AHL launches via the configured connectors.
+  Their security is the user's responsibility; AHL is the harness, not the agent.
 - Third-party LLM API keys. AHL reads them from environment variables
   (`AHL_JUDGE_API_KEY` / `AHL_SIM_API_KEY`) and never writes them to disk.
 
@@ -45,12 +44,12 @@ should upgrade.
 
 | Version | Supported |
 |---|---|
-| 0.9.x (current) | Yes |
-| 0.8.x and earlier | No (upgrade to the latest minor) |
+| 1.0.x (current line) | Yes |
+| 0.x | No (upgrade to the latest release) |
 
 ## Disclosure
 
 After a fix is released, the security advisory will be published with
 attribution to the reporter (unless they prefer to remain anonymous). The
-release notes / `CHANGELOG.md` will reference the advisory ID without
+release notes / GitHub Releases will reference the advisory ID without
 exposing exploit details before users have had a reasonable window to upgrade.

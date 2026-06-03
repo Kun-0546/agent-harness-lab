@@ -18,7 +18,7 @@ pip install -e .          # provides the `hlab` command (and `python -m agent_ha
 ## The command surface
 
 ```text
-hlab init <dir>            initialize a workspace (goal.md, evaluation-methods/, experiments/)
+hlab init                  initialize a workspace (goal.md, evaluation-methods/, experiments/)
 hlab new <name>            scaffold an experiment (--mode copilot|auto, --execution ab|...)
 hlab review <experiment>   validate experiment.yaml before running (PASS / WARN / ERROR)
 hlab run <experiment>      Copilot: render agent-task.md · Auto: drive runtimes + collect evidence

@@ -230,9 +230,12 @@ reports:
   formats:
     - md
 
-# Auto Optimize (the second Auto Mode layer) — schema only; the loop is NOT
-# implemented yet. Uncomment + set optimization.enabled: true to declare it (review
-# will WARN that it does not execute). editable_surface must be harness-controlled;
+# Auto Optimize (the second Auto Mode layer) — a bounded, deterministic
+# (copy-only / script-based) candidate -> evaluate -> promote loop. It IS
+# supported; it is NOT LLM-driven or autonomous. Uncomment + set
+# optimization.enabled: true to turn it on (review then emits an
+# `optimization_bounded_only` WARN: the loop runs, but only deterministically).
+# editable_surface must be harness-controlled;
 # goal / cases / evaluation / objective / conclusion are protected by default.
 # objective:
 #   primary_track: skill-artifact
@@ -243,7 +246,7 @@ reports:
 #   editable_surface:
 #     - harnesses/B/
 #   stop_conditions:
-#     - max_rounds: 5
+#     - max_iterations: 5
 #   promotion_policy:
 #     promote_if_track: skill-artifact
 #     reject_if_issue: case_failure
