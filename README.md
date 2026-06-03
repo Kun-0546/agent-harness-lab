@@ -106,7 +106,7 @@ Full walk-through, including the Auto Optimize example:
 ## Command surface
 
 ```text
-hlab init <dir>            initialize a workspace (goal.md, evaluation-methods/, experiments/)
+hlab init                  initialize a workspace (goal.md, evaluation-methods/, experiments/)
 hlab new <name>            scaffold an experiment (--mode copilot|auto, --execution ab|sequential|...)
 hlab review <experiment>   validate experiment.yaml before running (PASS / WARN / ERROR)
 hlab run <experiment>      Copilot: render agent-task.md · Auto: run + collect + inspect + evaluate

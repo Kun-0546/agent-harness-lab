@@ -1,14 +1,20 @@
 """Agent Harness Lab — `hlab` command-line entry (v1).
 
-Six public commands: init / new / review / run / status / report.
-This layer parses args, prints results, and delegates to scaffold / reviewer /
-experiment_spec. The old v0.10 engine modules (workflow.py, runner.py, ...)
-remain in the package as internal implementation reused by later phases; they
-are no longer exposed as CLI commands.
+Six public commands: init / new / review / run / status / report. This layer
+parses args, prints results, and delegates to the copilot / scaffold / reviewer /
+experiment_spec / auto / evaluation / report modules.
 
-Phase 1 scope: init, new, review, status are fully implemented; run and report
-validate and report a clear "implemented in a later phase" boundary (AutoRunner,
-CopilotTaskRenderer, ReportBuilder are not built yet).
+What the commands cover in v1:
+- Copilot Mode — `run` renders an agent-task.md for an external agent to execute.
+- Auto Run — `run` drives the configured Agent Runtimes, then collects, inspects,
+  and evaluates the resulting evidence.
+- Auto Optimize — a bounded, deterministic (copy-only / script-based)
+  candidate -> evaluate -> promote loop; it is not LLM-driven or autonomous.
+- evidence / evaluation / report — `status` shows evidence and evaluation state;
+  `report` builds reports/report.md from the collected evidence.
+
+Runs on Python 3.10-3.12. Modules in the package that are not reached by this CLI
+surface are internal and not part of the public API.
 """
 from __future__ import annotations
 

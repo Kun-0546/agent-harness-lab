@@ -400,7 +400,7 @@ optimization:
     - objective
     - conclusion.md
   stop_conditions:                     # REQUIRED when enabled: true
-    - max_rounds: 5
+    - max_iterations: 5                # honored keys: max_iterations | no_improvement
   promotion_policy:                    # must reference known tracks / issue types
     promote_if_track: skill-artifact
     reject_if_issue: case_failure
