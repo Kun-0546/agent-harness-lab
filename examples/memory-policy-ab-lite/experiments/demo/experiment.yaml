@@ -1,0 +1,69 @@
+# Memory policy A/B — eager injection (A) vs filtered retrieval (B). A deterministic
+# 5-dimension benchmark scores each on correctness / relevance / privacy / hallucination
+# / conciseness, picks a winner, and needs no API key. The llm_judge track is optional.
+# Run: hlab review <exp> -> run -> report -> compare -> conclude
+id: "demo"
+status: draft
+goal_ref: goal.md
+question: "Does filtered memory retrieval (B) beat eager memory injection (A) without leaking or hallucinating?"
+run:
+  mode: auto
+execution:
+  mode: ab
+  state_policy: isolated
+harnesses:
+  - id: A
+    name: eager-memory-injection
+    path: harnesses/A/
+  - id: B
+    name: filtered-memory-retrieval
+    path: harnesses/B/
+agent_runtimes:
+  - id: runtime-a
+    harness: A
+    spec: agent-runtimes/runtime-a.yaml
+  - id: runtime-b
+    harness: B
+    spec: agent-runtimes/runtime-b.yaml
+cases:
+  root: cases/
+  files:
+    - cases.jsonl
+simulator:
+  type: single_turn
+evaluation:
+  root: evaluation/
+  evaluators:
+    - id: memory_policy
+      method: benchmark
+      script: benchmarks/evaluate.py
+    - id: memory_judge
+      method: llm_judge
+      rubric: rubrics/memory_policy.md
+  tracks:
+    - id: memory-quality
+      question: "Which memory policy answers correctly without leaking or hallucinating?"
+      evaluators:
+        - memory_policy
+      evidence:
+        - traces
+    - id: judge-review
+      question: "An LLM judge's view (optional; needs AHL_JUDGE_* env, else pending)"
+      evaluators:
+        - memory_judge
+      evidence:
+        - traces
+objective:
+  primary_track: memory-quality
+  success_criteria: "correct answer, no irrelevant leak, no privacy leak, no hallucination"
+  optimize_for: maximize
+collection:
+  traces: true
+  raw: true
+  artifacts: true
+  snapshots: false
+  scores: true
+reports:
+  formats:
+    - md
+    - html

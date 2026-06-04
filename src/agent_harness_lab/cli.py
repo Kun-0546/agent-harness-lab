@@ -1,8 +1,9 @@
 """Agent Harness Lab — `hlab` command-line entry (v1).
 
-Six public commands: init / new / review / run / status / report. This layer
-parses args, prints results, and delegates to the copilot / scaffold / reviewer /
-experiment_spec / auto / evaluation / report modules.
+Eight public commands: init / new / review / run / status / report / compare /
+conclude. This layer parses args, prints results, and delegates to the copilot /
+scaffold / reviewer / experiment_spec / auto / evaluation / report / compare /
+conclude modules.
 
 What the commands cover in v1:
 - Copilot Mode — `run` renders an agent-task.md for an external agent to execute.
@@ -99,14 +100,32 @@ def cmd_new(args: argparse.Namespace) -> int:
         print("`experiments` exists but is not a directory — workspace is broken; "
               "remove it and run `hlab init`.", file=sys.stderr)
         return 1
+    template = getattr(args, "template", None)
     try:
         result = scaffold.new_experiment(
-            root, args.name, run_mode=args.mode, execution_mode=args.execution)
+            root, args.name, run_mode=args.mode, execution_mode=args.execution,
+            template=template)
+    except KeyError:
+        print(f"Unknown template: {template!r}. Available templates: "
+              f"{', '.join(sorted(scaffold.TEMPLATES)) or '(none)'}", file=sys.stderr)
+        return 1
     except (ValueError, FileExistsError) as e:
         print(str(e), file=sys.stderr)
         return 1
     eid = result.experiment_id
     note = f"  (name normalized to id '{eid}')" if eid != args.name else ""
+    if template:
+        print(f"Created experiment from template '{template}': experiments/{eid}{note}")
+        print(f"  {result.experiment_dir}")
+        print("  A complete, runnable A/B experiment was generated "
+              "(harnesses, runtimes, cases, and a deterministic benchmark).")
+        print()
+        print(f"Next: hlab review  experiments/{eid}")
+        print(f"      hlab run     experiments/{eid}")
+        print(f"      hlab report  experiments/{eid}")
+        print(f"      hlab compare experiments/{eid}")
+        print(f"      hlab conclude experiments/{eid} --winner <id> --reason \"...\"")
+        return 0
     print(f"Created experiment: experiments/{eid}  "
           f"(run.mode={args.mode}, execution.mode={args.execution}){note}")
     print(f"  {result.experiment_dir}")
@@ -384,7 +403,58 @@ def cmd_report(args: argparse.Namespace) -> int:
           "objective, and Auto Optimize state")
     print("  - pending llm_judge/human evaluations and an unrun Auto Optimize loop are "
           "marked honestly; no conclusion is fabricated")
-    print(f"Next: review it, then write your decision in conclusion.md.")
+    print(f"Next: hlab compare {args.experiment}, then record your decision with "
+          f"`hlab conclude {args.experiment} --winner <id> --reason \"...\"`.")
+    return 0
+
+
+def cmd_compare(args: argparse.Namespace) -> int:
+    exp_dir = _resolve_experiment(args.experiment)
+    if exp_dir is None:
+        print(f"Experiment not found: {args.experiment}", file=sys.stderr)
+        return 1
+    report = review_experiment(exp_dir)
+    if report.verdict == ERROR:
+        print(f"compare blocked: experiment.yaml has {len(report.errors)} error(s) — "
+              f"fix them first (`hlab review {args.experiment}`).", file=sys.stderr)
+        _print_review(report)
+        return 1
+    try:
+        spec = parse_experiment_yaml(exp_dir / "experiment.yaml")
+    except ExperimentSpecError as e:
+        print(str(e), file=sys.stderr)
+        return 1
+    from agent_harness_lab import compare
+    out_path, data = compare.write_comparison(exp_dir, spec)
+    print(compare.format_summary(data))
+    print()
+    print(f"compare written: {out_path}")
+    print(f"Next: record your decision with `hlab conclude {args.experiment} "
+          f"--winner {data['winner'] or '<id>'} --reason \"...\"`.")
+    return 0
+
+
+def cmd_conclude(args: argparse.Namespace) -> int:
+    exp_dir = _resolve_experiment(args.experiment)
+    if exp_dir is None:
+        print(f"Experiment not found: {args.experiment}", file=sys.stderr)
+        return 1
+    yaml_path = exp_dir / "experiment.yaml"
+    if not yaml_path.exists():
+        print(f"No experiment.yaml in {exp_dir}", file=sys.stderr)
+        return 1
+    try:
+        spec = parse_experiment_yaml(yaml_path)
+    except ExperimentSpecError as e:
+        print(str(e), file=sys.stderr)
+        return 1
+    from agent_harness_lab import conclude
+    out = conclude.write_conclusion(exp_dir, spec, winner=args.winner, reason=args.reason)
+    print(f"conclusion recorded: {out}")
+    if args.winner:
+        print(f"  - winner: {args.winner}")
+    print("  - this is your decision, not a generated verdict")
+    print(f"  - `hlab review {args.experiment}` will no longer warn conclusion_missing")
     return 0
 
 
@@ -407,6 +477,9 @@ def build_parser() -> argparse.ArgumentParser:
                        help="run mode (default: copilot)")
     p_new.add_argument("--execution", choices=["ab", "sequential", "longitudinal", "replay"],
                        default="ab", help="execution mode (default: ab)")
+    p_new.add_argument("--template", metavar="NAME",
+                       help="scaffold a complete, runnable experiment from a built-in "
+                            "template (e.g. memory-policy-ab-lite)")
     p_new.set_defaults(func=cmd_new)
 
     p_review = sub.add_parser("review", help="review an experiment before run (PASS/WARN/ERROR)")
@@ -424,6 +497,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_report = sub.add_parser("report", help="generate or refresh reports")
     p_report.add_argument("experiment", help="experiments/<name> or <name>")
     p_report.set_defaults(func=cmd_report)
+
+    p_compare = sub.add_parser("compare", help="summarize an A/B run into reports/compare.json")
+    p_compare.add_argument("experiment", help="experiments/<name> or <name>")
+    p_compare.set_defaults(func=cmd_compare)
+
+    p_conclude = sub.add_parser("conclude", help="record the human conclusion as conclusion.md")
+    p_conclude.add_argument("experiment", help="experiments/<name> or <name>")
+    p_conclude.add_argument("--winner", metavar="ID", help="the harness id you chose (e.g. B)")
+    p_conclude.add_argument("--reason", help="one-line reason for the decision")
+    p_conclude.set_defaults(func=cmd_conclude)
 
     return parser
 
@@ -454,5 +537,5 @@ def ahl_redirect(argv: list[str] | None = None) -> int:
           file=sys.stderr)
     print(f"Please use: hlab {rest}", file=sys.stderr)
     print("Run `hlab --help` for the v1 command surface "
-          "(init / new / review / run / status / report).", file=sys.stderr)
+          "(init / new / review / run / status / report / compare / conclude).", file=sys.stderr)
     return 1

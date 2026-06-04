@@ -88,7 +88,7 @@ class TestReportBuilder(unittest.TestCase):
                         [{"evaluator_id": "e1", "method": "llm_judge", "status": "pending"}])
             text = report_builder.build_report(exp, _spec(exp)).read_text(encoding="utf-8")
             self.assertIn("pending", text)
-            self.assertIn("offline stub", text)  # honest about no LLM call
+            self.assertIn("AHL_JUDGE", text)  # honest: pending unless a judge key is set
 
     def test_report_objective_summary(self):
         with _workspace() as ws:

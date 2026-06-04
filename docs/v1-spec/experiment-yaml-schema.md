@@ -510,7 +510,9 @@ Auto Mode uses unsupported connector
 
 ```text
 conclusion.md missing
-report.html requested but renderer unavailable
 human review required but not documented
 snapshots requested but no snapshot collection configured
 ```
+
+(`report.html` is rendered by a real stdlib Markdown→HTML renderer, so requesting it no
+longer warns.)

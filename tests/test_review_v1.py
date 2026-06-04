@@ -63,14 +63,16 @@ class TestReviewVerdicts(unittest.TestCase):
             self.assertEqual(rc, 1)
             self.assertIn("ERROR", out.getvalue())
 
-    def test_html_format_warns(self):
+    def test_html_format_does_not_warn(self):
+        # report.html now has a real stdlib renderer — requesting it must not warn.
         with workspace_with_experiment() as (_root, exp):
             y = exp / "experiment.yaml"
             text = y.read_text(encoding="utf-8").replace("    - md\n", "    - md\n    - html\n")
             y.write_text(text, encoding="utf-8")
             report = review_experiment(exp)
-            self.assertEqual(report.verdict, WARN)
-            self.assertTrue(any(p.code == "html_renderer_unavailable" for p in report.warnings))
+            self.assertNotEqual(report.verdict, ERROR)
+            self.assertFalse(any(p.code == "html_renderer_unavailable"
+                                 for p in report.warnings + report.errors))
 
     def test_auto_unsupported_connector_error(self):
         with workspace_with_experiment(name="autox", run_mode="auto") as (_root, exp):
