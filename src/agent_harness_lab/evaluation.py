@@ -15,8 +15,9 @@ Bounded by design:
                      so a misbehaving evaluator can never hang or orphan.
   - human_annotation — NO interactive UI. If an annotation file exists, ingest it;
                      else write a `pending` record (never blocks).
-  - llm_judge      — OFFLINE stub: never calls an external LLM. Writes a `pending`
-                     judge record (status: pending). It does not pretend to judge.
+  - llm_judge      — pending without AHL_JUDGE_API_KEY (it never invents a verdict);
+                     with AHL_JUDGE_* set it judges each (harness, case) via llm.chat,
+                     recording a request failure or unparseable reply as `error`.
 
 Outputs:
   evidence/scores/<track_id>/<evaluator_id>.jsonl   per-evaluator score records
@@ -33,6 +34,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from agent_harness_lab import llm
 from agent_harness_lab.agentconn import _POSIX, _pgid_of
 from agent_harness_lab.auto import _read_text, _sweep_group
 from agent_harness_lab.experiment_spec import (
@@ -178,11 +180,18 @@ def _run_benchmark(ev: EvaluatorSpec, track_id: str, exp_dir: Path,
         out.score = (sum(scores) / len(scores)) if scores else None
         for r in per:
             if isinstance(r, dict):
-                records.append({"track_id": track_id, "evaluator_id": ev.id, "method": ev.method,
-                                "status": PASSED if r.get("passed") else FAILED,
-                                "score": r.get("score"), "detail": str(r.get("detail", "")),
-                                "case_id": r.get("case_id"), "harness_id": r.get("harness_id"),
-                                "created_by": "EvaluationRunner"})
+                rec = {"track_id": track_id, "evaluator_id": ev.id, "method": ev.method,
+                       "status": PASSED if r.get("passed") else FAILED,
+                       "score": r.get("score"), "detail": str(r.get("detail", "")),
+                       "case_id": r.get("case_id"), "harness_id": r.get("harness_id"),
+                       "created_by": "EvaluationRunner"}
+                # additive + backward-compatible: a benchmark MAY emit per-(harness,case)
+                # `dimensions` (dict) and/or `issues` (list) for richer `hlab compare`;
+                # benchmarks that don't emit them are unaffected.
+                for opt in ("dimensions", "issues"):
+                    if opt in r:
+                        rec[opt] = r[opt]
+                records.append(rec)
     elif isinstance(parsed, dict) and "passed" in parsed:
         out.status = PASSED if parsed.get("passed") else FAILED
         out.score = parsed.get("score") if isinstance(parsed.get("score"), (int, float)) else None
@@ -234,23 +243,119 @@ def _run_human(ev: EvaluatorSpec, track_id: str, exp_dir: Path,
     return out
 
 
-def _run_llm_judge(ev: EvaluatorSpec, track_id: str, exp_dir: Path,
-                   eval_root: Path, scores_dir: Path) -> EvaluatorOutcome:
-    """Offline stub: never calls an LLM. Always writes a pending judge record."""
-    out = EvaluatorOutcome(track_id, ev.id or "?", ev.method, PENDING)
+# --- llm_judge: real LLM-based judging --------------------------------------
+# Reuses the stdlib `llm.chat` client (no new dependency). Config mirrors grader.py:
+# AHL_JUDGE_BASE_URL / AHL_JUDGE_MODEL / AHL_JUDGE_API_KEY. Honesty contract:
+#   - no AHL_JUDGE_API_KEY        -> PENDING (offline; never a fabricated verdict)
+#   - request fails/times out/5xx -> ERROR  (surfaced, not silently pending)
+#   - unparseable model reply     -> ERROR  (keeps a raw_response preview)
+
+def _judge_config() -> tuple[str, str, str]:
+    return (os.environ.get("AHL_JUDGE_BASE_URL", ""),
+            os.environ.get("AHL_JUDGE_MODEL", ""),
+            os.environ.get("AHL_JUDGE_API_KEY", ""))
+
+
+def _build_judge_prompt(rubric_text: str, case_input: str, agent_output: str,
+                        evidence_summary: str) -> str:
+    """Judge prompt over the v1 evidence model (rubric + one case's input/output)."""
+    rub = (rubric_text or "").strip() or "(no rubric file — judge general answer quality)"
+    return (
+        "You are a strict evaluator. Judge the agent's OUTPUT for the given CASE "
+        "against the RUBRIC. Be conservative: only 'pass' when the output clearly "
+        "satisfies the rubric.\n\n"
+        f"[RUBRIC]\n{rub}\n\n"
+        f"[CASE INPUT]\n{case_input}\n\n"
+        f"[AGENT OUTPUT]\n{agent_output}\n\n"
+        f"[EVIDENCE SUMMARY]\n{evidence_summary}\n\n"
+        "Reply with ONLY one JSON object and nothing else:\n"
+        '{"verdict": "pass" | "fail", "score": <integer 0-100>, "reason": "<one sentence>"}'
+    )
+
+
+def _parse_judge_verdict(text: str) -> tuple[str, float | None, str]:
+    """Extract (verdict, score, reason) from a judge reply. Raises ValueError if the
+    reply has no usable JSON object or no valid verdict."""
+    start, end = text.find("{"), text.rfind("}")
+    if start == -1 or end == -1 or end < start:
+        raise ValueError("judge reply contains no JSON object")
+    data = json.loads(text[start:end + 1])
+    verdict = str(data.get("verdict", "")).strip().lower()
+    if verdict not in ("pass", "fail"):
+        raise ValueError(f"verdict must be 'pass' or 'fail', got {verdict!r}")
+    raw_score = data.get("score")
+    score = max(0.0, min(100.0, float(raw_score))) if isinstance(raw_score, (int, float)) else None
+    return verdict, score, str(data.get("reason", "")).strip()
+
+
+def _run_llm_judge(ev: EvaluatorSpec, track_id: str, exp_dir: Path, eval_root: Path,
+                   scores_dir: Path, *, traces: dict[str, list[dict]],
+                   cases: list[dict]) -> EvaluatorOutcome:
+    """Judge each (harness, case) output with a real LLM, per the rubric.
+
+    Offline (no AHL_JUDGE_API_KEY) -> a single PENDING record (the historical, honest
+    behavior). Configured -> one record per judged case: verdict pass/fail -> status,
+    score -> score, reason -> detail; a failed request or unparseable reply -> ERROR.
+    """
     dest = scores_dir / track_id
     dest.mkdir(parents=True, exist_ok=True)
-    has_rubric = bool(ev.rubric) and (eval_root / ev.rubric).is_file() if ev.rubric else False
-    out.detail = ("rubric present; llm_judge is an offline stub (no LLM call) — pending"
-                  if has_rubric else
-                  "llm_judge is an offline stub (no LLM call) — pending; no rubric configured")
-    rec = {"track_id": track_id, "evaluator_id": ev.id, "method": ev.method,
-           "status": PENDING, "score": None, "detail": out.detail,
-           "rubric": ev.rubric, "created_by": "EvaluationRunner"}
     records_path = dest / f"{ev.id}.jsonl"
-    _write_jsonl(records_path, [rec])
-    out.records_path = str(records_path)
-    return out
+
+    rubric_text = ""
+    if ev.rubric:
+        rp = eval_root / ev.rubric
+        if rp.is_file():
+            rubric_text = _read_text(rp)
+
+    base, model, key = _judge_config()
+    if not key:
+        # offline -> pending; never fabricate a verdict
+        detail = ("llm_judge: AHL_JUDGE_API_KEY not set — offline, pending "
+                  "(set AHL_JUDGE_BASE_URL / AHL_JUDGE_MODEL / AHL_JUDGE_API_KEY to judge)")
+        rec = {"track_id": track_id, "evaluator_id": ev.id, "method": ev.method,
+               "status": PENDING, "score": None, "detail": detail,
+               "rubric": ev.rubric, "created_by": "EvaluationRunner"}
+        _write_jsonl(records_path, [rec])
+        return EvaluatorOutcome(track_id, ev.id or "?", ev.method, PENDING,
+                                detail=detail, records_path=str(records_path))
+
+    case_by_id = {c.get("id"): c for c in cases if isinstance(c, dict)}
+    # one judged unit per (harness, case) — every trace record that has a response
+    units = [r for recs in traces.values() for r in recs
+             if isinstance(r, dict) and r.get("response") is not None]
+
+    records: list[dict] = []
+    statuses: list[str] = []
+    for r in units:
+        cid, hid = r.get("case_id"), r.get("harness_id")
+        case_input = r.get("input") or str(case_by_id.get(cid, {}).get("input", ""))
+        agent_output = str(r.get("response") or "")
+        evidence_summary = f"case_id={cid}, harness_id={hid}, ok={r.get('ok')}"
+        rec: dict = {"track_id": track_id, "evaluator_id": ev.id, "method": ev.method,
+                     "case_id": cid, "harness_id": hid, "created_by": "EvaluationRunner"}
+        try:
+            raw = llm.chat(base, model, key,
+                           _build_judge_prompt(rubric_text, case_input, agent_output,
+                                               evidence_summary))
+        except Exception as e:  # noqa: BLE001 — request failed/timeout/5xx after retries
+            rec.update({"status": ERROR, "score": None,
+                        "detail": f"llm_judge request failed: {e}"})
+            records.append(rec); statuses.append(ERROR); continue
+        try:
+            verdict, score, reason = _parse_judge_verdict(raw)
+        except (ValueError, json.JSONDecodeError) as e:
+            rec.update({"status": ERROR, "score": None,
+                        "detail": f"llm_judge: unparseable reply ({e})",
+                        "raw_response": raw[:500]})
+            records.append(rec); statuses.append(ERROR); continue
+        status = PASSED if verdict == "pass" else FAILED
+        rec.update({"status": status, "score": score, "detail": reason})
+        records.append(rec); statuses.append(status)
+
+    _write_jsonl(records_path, records)
+    return EvaluatorOutcome(track_id, ev.id or "?", ev.method, _aggregate(statuses),
+                            detail=f"llm_judge judged {len(records)} case(s)",
+                            records_path=str(records_path))
 
 
 def run_evaluation(exp_dir: Path, spec: ExperimentSpec, *,
@@ -294,7 +399,8 @@ def run_evaluation(exp_dir: Path, spec: ExperimentSpec, *,
             elif ev.method == "human_annotation":
                 outcomes.append(_run_human(ev, tid, exp_dir, eval_root, scores_dir))
             elif ev.method == "llm_judge":
-                outcomes.append(_run_llm_judge(ev, tid, exp_dir, eval_root, scores_dir))
+                outcomes.append(_run_llm_judge(ev, tid, exp_dir, eval_root, scores_dir,
+                                               traces=traces, cases=cases))
             else:
                 outcomes.append(EvaluatorOutcome(tid, ev_id, ev.method, ERROR,
                                                  detail=f"unknown evaluator method {ev.method!r}"))

@@ -1079,9 +1079,7 @@ def validate_spec(spec: ExperimentSpec, experiment_dir: Path) -> list[Problem]:
     # --- warnings (schema §18) ---
     if not (experiment_dir / "conclusion.md").exists():
         warn("conclusion_missing", "conclusion.md is missing (human conclusion not yet recorded)")
-    if "html" in spec.report_formats:
-        warn("html_renderer_unavailable",
-             "report.html requested but the HTML renderer is not available yet (Phase 1)")
+    # report.html is rendered by markdown_html (a real, stdlib renderer) — no WARN.
     _effective_methods = set(spec.evaluation_methods) | {
         ev.method for ev in spec.evaluators if isinstance(ev.method, str)}
     if "human_annotation" in _effective_methods:

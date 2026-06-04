@@ -1,4 +1,4 @@
-"""The v1 public CLI surface is exactly 6 `hlab` commands; `ahl` redirects."""
+"""The v1 public CLI surface is exactly 8 `hlab` commands; `ahl` redirects."""
 import argparse
 import io
 import sys
@@ -7,10 +7,10 @@ from contextlib import redirect_stderr, redirect_stdout
 
 from agent_harness_lab import cli
 
-V1_COMMANDS = {"init", "new", "review", "run", "status", "report"}
+V1_COMMANDS = {"init", "new", "review", "run", "status", "report", "compare", "conclude"}
 OLD_COMMANDS = {
     "walkthrough", "connect", "show", "cases", "rubric", "simulator",
-    "harnesses", "versions", "draft", "score", "compare", "probe",
+    "harnesses", "versions", "draft", "score", "probe",
 }
 
 
@@ -25,7 +25,7 @@ class TestSurface(unittest.TestCase):
     def test_prog_is_hlab(self):
         self.assertEqual(cli.build_parser().prog, "hlab")
 
-    def test_exactly_six_commands(self):
+    def test_exactly_eight_commands(self):
         choices = _subparser_choices(cli.build_parser())
         self.assertEqual(choices, V1_COMMANDS,
                          f"public surface must be exactly {sorted(V1_COMMANDS)}, got {sorted(choices)}")

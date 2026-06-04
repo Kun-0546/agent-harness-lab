@@ -78,12 +78,20 @@ two layers:
 | Run modes | Copilot, Auto | — |
 | Auto layers | Auto Run; **bounded/deterministic** Auto Optimize (copy-only + `mutation_script`) | LLM-based mutation; fully autonomous, remote/distributed optimization; general self-improvement engine |
 | Connectors | `local_cli`, `script` | `remote_devbox`, `api`, `bridge`, `manual` — declarable but **not executed** (rejected by review) |
-| Evaluation | `benchmark` (runs a deterministic script) | — |
-| Evaluation (honest stubs) | `human_annotation` (ingests an annotation file if present, else **pending**); `llm_judge` (**offline stub → always pending**; no model is called) | real LLM-based judging |
+| Evaluation | `benchmark` (deterministic script); `llm_judge` (**real LLM judging** when `AHL_JUDGE_BASE_URL` / `AHL_JUDGE_MODEL` / `AHL_JUDGE_API_KEY` are set; **pending** without a key — never a fabricated verdict); `human_annotation` (ingests an annotation file, else **pending**) | streaming / multi-model judging |
 | State policies | `isolated`, `reset` (executed) | `cumulative`, `snapshot_branch`, `replay` — declarable → WARN, not executed |
-| Output | evidence tree (traces / raw / artifacts / scores / inspections / issues), `reports/report.md` | — |
+| Reporting | `reports/report.md` + a real `reports/report.html` (stdlib renderer, no dependency); `compare` → `reports/compare.json`; `conclude` → `conclusion.md` | hosted dashboard; HTML charts |
+| Output | evidence tree (traces / raw / artifacts / scores / inspections / issues) | — |
 
 If a step is pending or unrun, AHL says so in `review`, `status`, and the report.
+
+## Not in scope (by design)
+
+- **No hosted dashboard / web UI** — AHL writes files you read locally.
+- **No autonomous self-improvement** — Auto Optimize is a bounded, deterministic loop.
+- **No remote connector completion** — `remote_devbox` / `api` / `bridge` are declarable
+  but not executed.
+- **Not an enterprise Agent-Eval platform** — it is a single-user, local workbench.
 
 ## Quickstart
 
@@ -91,27 +99,40 @@ If a step is pending or unrun, AHL says so in `review`, `status`, and the report
 pip install -e .          # provides `hlab` (and `python -m agent_harness_lab`)
 ```
 
-Run a shipped example end to end — local, deterministic, no network, no API keys:
+Generate a complete, runnable A/B experiment and drive the whole path — local,
+deterministic, **no network, no API key**:
 
 ```bash
-cd examples/auto-run-local-cli-lite
-PYTHONPATH=../../src python -m agent_harness_lab review experiments/demo
-PYTHONPATH=../../src python -m agent_harness_lab run    experiments/demo
-PYTHONPATH=../../src python -m agent_harness_lab report experiments/demo
+hlab init
+hlab new memory-policy-ab --template memory-policy-ab-lite
+hlab review   experiments/memory-policy-ab
+hlab run      experiments/memory-policy-ab     # drive both harnesses, collect evidence, evaluate
+hlab report   experiments/memory-policy-ab     # -> reports/report.md + reports/report.html
+hlab compare  experiments/memory-policy-ab     # -> reports/compare.json (winner: B)
+hlab conclude experiments/memory-policy-ab --winner B \
+  --reason "Filtered retrieval cut leakage while keeping task success."
 ```
 
-Full walk-through, including the Auto Optimize example:
-[`docs/quickstart.md`](docs/quickstart.md). Both examples: [`examples/`](examples/).
+The deterministic benchmark decides the winner with **no API key**. `llm_judge` adds an
+LLM's view only when `AHL_JUDGE_BASE_URL` / `AHL_JUDGE_MODEL` / `AHL_JUDGE_API_KEY` are set
+— without a key it stays **pending**, never a fabricated score. `report` writes both
+`report.md` and a rendered `report.html`.
+
+Shipped examples (browse or run): [`examples/`](examples/) — including the flagship
+[`memory-policy-ab-lite`](examples/memory-policy-ab-lite/). Full walk-through:
+[`docs/quickstart.md`](docs/quickstart.md).
 
 ## Command surface
 
 ```text
-hlab init                  initialize a workspace (goal.md, evaluation-methods/, experiments/)
-hlab new <name>            scaffold an experiment (--mode copilot|auto, --execution ab|sequential|...)
-hlab review <experiment>   validate experiment.yaml before running (PASS / WARN / ERROR)
-hlab run <experiment>      Copilot: render agent-task.md · Auto: run + collect + inspect + evaluate
-hlab status <experiment>   show status + evidence / evaluation state
-hlab report <experiment>   build reports/report.md from the evidence
+hlab init                   initialize a workspace (goal.md, evaluation-methods/, experiments/)
+hlab new <name>             scaffold an experiment; --template <name> for a complete runnable one
+hlab review <experiment>    validate experiment.yaml before running (PASS / WARN / ERROR)
+hlab run <experiment>       Copilot: render agent-task.md · Auto: run + collect + inspect + evaluate
+hlab status <experiment>    show status + evidence / evaluation state
+hlab report <experiment>    build reports/report.md (+ report.html) from the evidence
+hlab compare <experiment>   summarize the A/B result into reports/compare.json
+hlab conclude <experiment>  record your decision as conclusion.md (--winner, --reason)
 ```
 
 `hlab <cmd>` and `python -m agent_harness_lab <cmd>` are equivalent. `ahl` remains as a

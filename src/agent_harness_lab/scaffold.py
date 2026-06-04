@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from agent_harness_lab.experiment_spec import make_experiment_id
+from agent_harness_lab.experiment_templates import TEMPLATES
 
 # --- workspace-level templates ----------------------------------------------
 
@@ -465,12 +466,15 @@ class NewResult:
 
 
 def new_experiment(root: Path, name: str, run_mode: str = "copilot",
-                   execution_mode: str = "ab", question: str | None = None) -> NewResult:
+                   execution_mode: str = "ab", question: str | None = None,
+                   template: str | None = None) -> NewResult:
     """Create experiments/<name>/ with a valid v1 tree that reviews with no ERROR.
 
     The directory name is the normalized (kebab-case) id, so dir == id.
+    If `template` is given, scaffold a complete, runnable experiment from that built-in
+    template (see experiment_templates.TEMPLATES) instead of the empty skeleton.
     Raises ValueError if the name has no usable [a-z0-9], FileExistsError if the
-    experiment already exists.
+    experiment already exists, KeyError if `template` is unknown.
     """
     exp_id = make_experiment_id(name)
     if not exp_id:
@@ -495,6 +499,19 @@ def new_experiment(root: Path, name: str, run_mode: str = "copilot",
         created.append(rel + "/")
         if not any(p.iterdir()):  # keep empty scaffolded dirs under version control
             (p / ".gitkeep").write_text("", encoding="utf-8")
+
+    if template is not None:
+        if template not in TEMPLATES:
+            raise KeyError(template)
+        for rel, content in TEMPLATES[template](exp_id).items():
+            _write(rel, content)
+        for sub in _EVIDENCE_SUBDIRS:
+            _mkdir(f"evidence/{sub}")
+        _write("evidence/issues.jsonl", "")
+        _mkdir("reports")
+        # No conclusion.md on purpose: `hlab conclude` records the human decision.
+        # Until then `hlab review` warns conclusion_missing — the intended demo arc.
+        return NewResult(exp_dir, exp_id, created)
 
     q = question or f"<one-line question for experiment {exp_id}>"
     state_policy = _STATE_POLICY_BY_EXECUTION.get(execution_mode, "isolated")

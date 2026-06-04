@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from agent_harness_lab import markdown_html
 from agent_harness_lab.experiment_spec import (
     ExperimentSpec,
     ExperimentSpecError,
@@ -308,8 +309,9 @@ def _build_markdown(exp_dir: Path, spec: ExperimentSpec) -> str:
     if any_pending:
         L.append("")
         L.append("> Some tracks are **pending**: `human_annotation` evaluators await an "
-                 "annotation file and `llm_judge` evaluators run as an **offline stub "
-                 "(no LLM call)** in this phase. Their verdicts are not final.")
+                 "annotation file, and `llm_judge` evaluators are pending unless "
+                 "`AHL_JUDGE_*` is configured (a missing key is reported as pending — the "
+                 "judge never invents a verdict). Their verdicts are not final.")
     L.append("")
 
     # Objective
@@ -384,8 +386,9 @@ def _build_markdown(exp_dir: Path, spec: ExperimentSpec) -> str:
 
     # Known limitations (honest, phase-accurate)
     L.append("## Known limitations")
-    L.append("- `llm_judge` evaluators are an **offline stub** — no external LLM is called; "
-             "their scores are pending.")
+    L.append("- `llm_judge` evaluators call a real LLM only when `AHL_JUDGE_BASE_URL` / "
+             "`AHL_JUDGE_MODEL` / `AHL_JUDGE_API_KEY` are set; otherwise they are pending "
+             "(the judge never invents a score).")
     L.append("- `human_annotation` requires an annotation file; absent it stays pending.")
     L.append("- Executable connectors are `local_cli` / `script` only; "
              "`remote_devbox` / `api` / `bridge` are not executed in this phase.")
@@ -417,7 +420,11 @@ def _build_markdown(exp_dir: Path, spec: ExperimentSpec) -> str:
 
 
 def build_report(exp_dir: Path, spec: ExperimentSpec) -> Path:
-    """Write reports/report.md (+ minimal report.html if requested). Returns the .md path."""
+    """Write reports/report.md (+ report.html if `html` is in reports.formats).
+
+    Returns the .md path. report.html is a real, self-contained Markdown render of
+    the same report.md (stdlib renderer; no external dependency) — content is escaped,
+    so evidence text cannot inject markup."""
     exp_dir = Path(exp_dir).resolve()
     reports_dir = exp_dir / "reports"
     reports_dir.mkdir(parents=True, exist_ok=True)
@@ -425,11 +432,6 @@ def build_report(exp_dir: Path, spec: ExperimentSpec) -> Path:
     md_path = reports_dir / "report.md"
     md_path.write_text(md, encoding="utf-8")
     if "html" in (spec.report_formats or []):
-        # Minimal, honest render: the markdown verbatim inside a <pre> block. Not a
-        # full Markdown→HTML renderer (review WARNs that one is unavailable).
-        esc = md.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-        html = (f"<!doctype html><html><head><meta charset=\"utf-8\">"
-                f"<title>Report: {spec.id or ''}</title></head>"
-                f"<body><pre>{esc}</pre></body></html>\n")
-        (reports_dir / "report.html").write_text(html, encoding="utf-8")
+        rendered = markdown_html.render(md, title=f"Report: {spec.id or 'experiment'}")
+        (reports_dir / "report.html").write_text(rendered, encoding="utf-8")
     return md_path

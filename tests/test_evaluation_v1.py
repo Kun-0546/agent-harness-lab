@@ -4,7 +4,9 @@ Evaluators run within tracks; benchmark executes a script, human_annotation/llm_
 are honest pending stubs; tracks aggregate; the objective's primary track is reflected.
 """
 import json
+import os
 import unittest
+from unittest import mock
 
 from agent_harness_lab import evaluation
 from agent_harness_lab.experiment_spec import parse_experiment_yaml
@@ -144,18 +146,22 @@ class TestHumanAndLlm(unittest.TestCase):
             res = evaluation.run_evaluation(exp, _spec(exp))
             self.assertEqual(res.tracks[0].status, "passed")
 
-    def test_llm_judge_is_offline_pending_stub(self):
-        with _workspace() as ws:
-            ev = "    - id: j1\n      method: llm_judge\n      rubric: rubrics/q.md\n"
-            tr = "    - id: judged\n      evaluators: [j1]\n      evidence: [traces]\n"
-            exp = _setup_exp(ws, _eval_section(ev, tr),
-                             scripts={"rubrics/q.md": "# rubric\njudge quality\n"})
-            res = evaluation.run_evaluation(exp, _spec(exp))
-            self.assertEqual(res.tracks[0].status, "pending")
-            rec = json.loads((exp / "evidence" / "scores" / "judged" / "j1.jsonl")
-                             .read_text(encoding="utf-8").splitlines()[0])
-            self.assertEqual(rec["status"], "pending")
-            self.assertIn("stub", rec["detail"])
+    def test_llm_judge_pending_without_key(self):
+        # No AHL_JUDGE_API_KEY -> llm_judge stays pending (never a fabricated verdict).
+        with mock.patch.dict(os.environ, {}, clear=False):
+            for k in ("AHL_JUDGE_API_KEY", "AHL_JUDGE_BASE_URL", "AHL_JUDGE_MODEL"):
+                os.environ.pop(k, None)
+            with _workspace() as ws:
+                ev = "    - id: j1\n      method: llm_judge\n      rubric: rubrics/q.md\n"
+                tr = "    - id: judged\n      evaluators: [j1]\n      evidence: [traces]\n"
+                exp = _setup_exp(ws, _eval_section(ev, tr),
+                                 scripts={"rubrics/q.md": "# rubric\njudge quality\n"})
+                res = evaluation.run_evaluation(exp, _spec(exp))
+                self.assertEqual(res.tracks[0].status, "pending")
+                rec = json.loads((exp / "evidence" / "scores" / "judged" / "j1.jsonl")
+                                 .read_text(encoding="utf-8").splitlines()[0])
+                self.assertEqual(rec["status"], "pending")
+                self.assertIn("AHL_JUDGE_API_KEY", rec["detail"])
 
 
 class TestAggregationAndObjective(unittest.TestCase):
