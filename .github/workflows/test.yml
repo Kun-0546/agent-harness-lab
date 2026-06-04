@@ -30,3 +30,6 @@ jobs:
 
       - name: Public MVP verification
         run: PYTHON=python bash scripts/verify_public_mvp.sh
+
+      - name: Public completion verification
+        run: bash scripts/verify_public_completion.sh
