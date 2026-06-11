@@ -43,6 +43,50 @@ class TestSurface(unittest.TestCase):
         self.assertIn("hlab", out.getvalue())
 
 
+class TestHelpPresentation(unittest.TestCase):
+    """C1/C2: the top-level help states the object model, groups commands by
+    loop stage, names the exit-code contract, and every per-command line shows
+    its explicit object argument."""
+
+    def _help(self) -> str:
+        return cli.build_parser().format_help()
+
+    def test_object_model_sentence_on_top(self):
+        text = self._help()
+        self.assertIn("exactly two objects", text)
+        self.assertIn("WORKSPACE", text)
+        self.assertIn("EXPERIMENT", text)
+        self.assertIn("every other command acts on one experiment directory", text)
+
+    def test_commands_grouped_by_loop_stage(self):
+        text = self._help()
+        self.assertIn("the experiment loop", text)
+        for group in ("prepare", "gate & execute", "conclude"):
+            self.assertIn(group, text)
+
+    def test_exit_code_contract_in_help(self):
+        text = self._help()
+        self.assertIn("exit codes", text)
+        self.assertIn("3  runtime failure", text)
+        self.assertIn("2  not implemented", text)
+
+    def test_each_experiment_command_help_line_names_its_object(self):
+        # verb + explicit object argument + one-line user understanding
+        text = self._help()
+        for cmd in ("review", "run", "status", "report", "compare", "conclude"):
+            self.assertRegex(text, rf"{cmd}\s+<experiment>:",
+                             f"`{cmd}` help line must show its <experiment> object")
+        self.assertRegex(text, r"new\s+<name>:")
+
+    def test_subcommand_usage_shows_experiment_metavar(self):
+        for a in cli.build_parser()._actions:
+            if isinstance(a, argparse._SubParsersAction):
+                for name in ("review", "run", "status", "report", "compare", "conclude"):
+                    usage = a.choices[name].format_usage()
+                    self.assertIn("<experiment>", usage,
+                                  f"`hlab {name}` usage must show <experiment>")
+
+
 class TestAhlRedirect(unittest.TestCase):
     def test_ahl_redirect_exit_1_with_message(self):
         saved = sys.argv
@@ -57,6 +101,26 @@ class TestAhlRedirect(unittest.TestCase):
         text = err.getvalue()
         self.assertIn("hlab", text)
         self.assertIn("ahl", text)
+
+    def test_ahl_redirect_is_honest_about_incompatibility(self):
+        # R9: no fake "Please use: hlab <args>" shim — the two stacks' workspace
+        # formats are NOT compatible, and the message must say so + point at the
+        # README until migrating-from-ahl.md (v1.1) lands.
+        saved = sys.argv
+        sys.argv = ["ahl", "score", "foo"]
+        try:
+            err = io.StringIO()
+            with redirect_stderr(err):
+                rc = cli.ahl_redirect()
+        finally:
+            sys.argv = saved
+        self.assertEqual(rc, 1)
+        text = err.getvalue()
+        self.assertNotIn("Please use: hlab", text)
+        self.assertNotIn("hlab score", text)  # never echo an old command as if it works
+        self.assertIn("NOT compatible", text)
+        self.assertIn("README", text)
+        self.assertIn("migrating-from-ahl.md", text)
 
 
 if __name__ == "__main__":

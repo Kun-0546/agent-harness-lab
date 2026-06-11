@@ -146,6 +146,46 @@ class TestHumanAndLlm(unittest.TestCase):
             res = evaluation.run_evaluation(exp, _spec(exp))
             self.assertEqual(res.tracks[0].status, "passed")
 
+    def test_human_annotation_passed_false_is_failed(self):
+        # explicit false is a real verdict (FAILED), not an error
+        with _workspace() as ws:
+            exp = _setup_exp(ws, self._human_section())
+            ann = exp / "evidence" / "scores" / "review" / "h1.annotation.json"
+            ann.parent.mkdir(parents=True, exist_ok=True)
+            ann.write_text(json.dumps({"passed": False, "detail": "rejected"}),
+                           encoding="utf-8")
+            res = evaluation.run_evaluation(exp, _spec(exp))
+            self.assertEqual(res.tracks[0].status, "failed")
+
+    def test_human_annotation_missing_passed_is_error(self):
+        # a score alone is not a verdict — missing `passed` must surface as ERROR
+        with _workspace() as ws:
+            exp = _setup_exp(ws, self._human_section())
+            ann = exp / "evidence" / "scores" / "review" / "h1.annotation.json"
+            ann.parent.mkdir(parents=True, exist_ok=True)
+            ann.write_text(json.dumps({"score": 0.9}), encoding="utf-8")
+            res = evaluation.run_evaluation(exp, _spec(exp))
+            self.assertEqual(res.tracks[0].status, "error")
+            rec = json.loads((exp / "evidence" / "scores" / "review" / "h1.jsonl")
+                             .read_text(encoding="utf-8").splitlines()[0])
+            self.assertEqual(rec["status"], "error")
+            self.assertIn('missing boolean "passed"', rec["detail"])
+            self.assertIn("h1.annotation.json", rec["detail"])  # file path named
+            self.assertIn('"passed": bool', rec["detail"])      # expected schema named
+
+    def test_human_annotation_non_bool_passed_is_error(self):
+        # truthy strings like "yes" must NOT silently pass — type matters
+        with _workspace() as ws:
+            exp = _setup_exp(ws, self._human_section())
+            ann = exp / "evidence" / "scores" / "review" / "h1.annotation.json"
+            ann.parent.mkdir(parents=True, exist_ok=True)
+            ann.write_text(json.dumps({"passed": "yes", "score": 1.0}), encoding="utf-8")
+            res = evaluation.run_evaluation(exp, _spec(exp))
+            self.assertEqual(res.tracks[0].status, "error")
+            rec = json.loads((exp / "evidence" / "scores" / "review" / "h1.jsonl")
+                             .read_text(encoding="utf-8").splitlines()[0])
+            self.assertIn('missing boolean "passed"', rec["detail"])
+
     def test_llm_judge_pending_without_key(self):
         # No AHL_JUDGE_API_KEY -> llm_judge stays pending (never a fabricated verdict).
         with mock.patch.dict(os.environ, {}, clear=False):

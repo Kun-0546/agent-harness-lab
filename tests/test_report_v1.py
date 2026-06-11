@@ -118,6 +118,28 @@ class TestReportBuilder(unittest.TestCase):
             report_builder.build_report(exp, _spec(exp))
             self.assertTrue((exp / "reports" / "report.html").is_file())
 
+    def test_report_methodology_section(self):
+        # R7: Methodology lists each track's evaluators+methods, the status
+        # meanings (pending/error), and the score semantics per method.
+        with _workspace() as ws:
+            exp = _exp(ws, _EVAL)
+            text = report_builder.build_report(exp, _spec(exp)).read_text(encoding="utf-8")
+            self.assertIn("## Methodology", text)
+            self.assertIn("Track `quality` — evaluators: `e1` (llm_judge)", text)
+            self.assertIn("Status meanings", text)
+            self.assertIn("`pending`", text)
+            self.assertIn("`error`", text)
+            self.assertIn("stdout", text)      # benchmark score source (stdout JSON)
+            self.assertIn("0-100", text)       # llm_judge score scale
+            self.assertIn("human_annotation", text)
+
+    def test_report_methodology_without_tracks_is_honest(self):
+        with _workspace() as ws:
+            exp = _exp(ws)
+            text = report_builder.build_report(exp, _spec(exp)).read_text(encoding="utf-8")
+            self.assertIn("## Methodology", text)
+            self.assertIn("No evaluation tracks configured", text)
+
 
 if __name__ == "__main__":
     unittest.main()

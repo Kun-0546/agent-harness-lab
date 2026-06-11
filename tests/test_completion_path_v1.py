@@ -32,12 +32,13 @@ _EXE = sys.executable.replace("\\", "/")
 # --- llm_judge real judging --------------------------------------------------
 
 class TestLlmJudgeReal(unittest.TestCase):
-    def _judge(self, chat_impl):
+    def _judge(self, chat_impl, traces=None):
         with tempfile.TemporaryDirectory() as tmp:
             scores = Path(tmp) / "scores"
             ev = SimpleNamespace(id="j1", method="llm_judge", rubric=None)
-            traces = {"runtime-a": [{"case_id": "c1", "harness_id": "A",
-                                     "input": "q", "response": "an answer", "ok": True}]}
+            if traces is None:
+                traces = {"runtime-a": [{"case_id": "c1", "harness_id": "A",
+                                         "input": "q", "response": "an answer", "ok": True}]}
             env = {"AHL_JUDGE_API_KEY": "k", "AHL_JUDGE_BASE_URL": "http://x",
                    "AHL_JUDGE_MODEL": "m"}
             with mock.patch.dict(os.environ, env, clear=False), \
@@ -86,6 +87,68 @@ class TestLlmJudgeReal(unittest.TestCase):
                         traces={"r": [{"case_id": "c1", "harness_id": "A", "response": "x"}]},
                         cases=[{"id": "c1"}])
         self.assertEqual(out.status, "pending")
+
+    def test_no_key_zero_judgeable_units_stays_pending(self):
+        # the 0-judgeable-units ERROR must NOT fire offline: no key -> still pending
+        with mock.patch.dict(os.environ, {}, clear=False):
+            for k in ("AHL_JUDGE_API_KEY", "AHL_JUDGE_BASE_URL", "AHL_JUDGE_MODEL"):
+                os.environ.pop(k, None)
+            with mock.patch.object(llm, "chat", side_effect=AssertionError("called")):
+                with tempfile.TemporaryDirectory() as tmp:
+                    ev = SimpleNamespace(id="j1", method="llm_judge", rubric=None)
+                    out = evaluation._run_llm_judge(
+                        ev, "t", Path(tmp), Path(tmp), Path(tmp) / "scores",
+                        traces={"r": [{"case_id": "c1", "harness_id": "A",
+                                       "input": "q", "exit_code": 0, "ok": True}]},
+                        cases=[{"id": "c1"}])
+        self.assertEqual(out.status, "pending")
+
+    def test_configured_zero_judgeable_units_is_error(self):
+        # script connector trace shape (input/exit_code/ok, no `response`) + a key:
+        # trace records exist but 0 judgeable units -> explicit ERROR, never silent pending
+        def never(*a, **k):
+            raise AssertionError("llm.chat must not be called with 0 judgeable units")
+        out, recs = self._judge(never, traces={
+            "runtime-a": [{"case_id": "c1", "harness_id": "A",
+                           "input": "q", "exit_code": 0, "ok": True}]})
+        self.assertEqual(out.status, "error")
+        self.assertIn("response", out.detail)
+        self.assertIn("script connector", out.detail)
+        self.assertEqual(recs[0]["status"], "error")
+
+    def test_configured_no_trace_records_stays_pending(self):
+        # no trace records at all (run not executed yet) -> pending, not error
+        def never(*a, **k):
+            raise AssertionError("llm.chat must not be called without traces")
+        out, _ = self._judge(never, traces={})
+        self.assertEqual(out.status, "pending")
+        out, _ = self._judge(never, traces={"runtime-a": []})  # file exists, no records
+        self.assertEqual(out.status, "pending")
+
+    def test_judge_timeout_passed_to_llm_chat(self):
+        # AHL_JUDGE_TIMEOUT (module constant) must reach llm.chat as `timeout=`
+        seen = {}
+        def chat(base, model, key, prompt, timeout=None, **kw):
+            seen["timeout"] = timeout
+            return '{"verdict": "pass", "score": 90, "reason": "ok"}'
+        with mock.patch.object(evaluation, "_JUDGE_TIMEOUT", 42.5):
+            out, _ = self._judge(chat)
+        self.assertEqual(out.status, "passed")
+        self.assertEqual(seen["timeout"], 42.5)
+
+    def test_judge_timeout_env_parse_and_invalid_fallback(self):
+        # module-level parse (mirrors AHL_EVAL_TIMEOUT): valid value taken,
+        # garbage falls back to the llm.chat default of 180
+        import importlib
+        try:
+            with mock.patch.dict(os.environ, {"AHL_JUDGE_TIMEOUT": "33.5"}):
+                importlib.reload(evaluation)
+                self.assertEqual(evaluation._JUDGE_TIMEOUT, 33.5)
+            with mock.patch.dict(os.environ, {"AHL_JUDGE_TIMEOUT": "not-a-number"}):
+                importlib.reload(evaluation)
+                self.assertEqual(evaluation._JUDGE_TIMEOUT, 180.0)
+        finally:
+            importlib.reload(evaluation)  # restore the ambient-env module state
 
 
 # --- report.html renderer ----------------------------------------------------
@@ -146,12 +209,21 @@ class TestTemplateScaffold(unittest.TestCase):
 
 
 class TestExampleMatchesTemplate(unittest.TestCase):
-    """The committed flagship example must equal what the template generates (no drift)."""
+    """The committed flagship example must equal what the template generates (no drift).
+
+    R4: the builder writes the generation-time probed interpreter into the runtime
+    YAML `command:` (the committed example keeps the canonical `python3`), so the
+    diff normalizes that one substitution back before comparing.
+    """
     def test_example_equals_template_output(self):
+        from agent_harness_lab.experiment_templates import detect_python_command
+        interp = detect_python_command()
         files = TEMPLATES["memory-policy-ab-lite"]("demo")
         base = (Path(__file__).resolve().parents[1] / "examples"
                 / "memory-policy-ab-lite" / "experiments" / "demo")
         for rel, content in files.items():
+            content = content.replace(f"command: '{interp} agent.py'",
+                                      "command: python3 agent.py")
             self.assertEqual((base / rel).read_text(encoding="utf-8"), content,
                              f"committed example diverged from template: {rel}")
 

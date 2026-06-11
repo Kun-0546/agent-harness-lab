@@ -43,6 +43,22 @@ class TestSchemaHygiene(_Base):
         self._edit("  artifact_review: true", "  artifact_review: 5")
         self.assertIn("bad_inspection_value", self._codes(ERROR))
 
+    def test_declared_review_switches_warn_unimplemented(self):
+        # R8 honesty: skill/memory/context review are declarable-only in v1 —
+        # declaring one true must WARN, never silently no-op.
+        for key in ("skill_review", "memory_review", "context_review"):
+            self._edit(f"  {key}: false", f"  {key}: true")
+        msgs = [p.message for p in self._problems()
+                if p.code == "inspection_review_unimplemented" and p.level == WARN]
+        self.assertEqual(len(msgs), 3, msgs)
+        for m in msgs:
+            self.assertIn("declared but not executed in v1", m)
+
+    def test_artifact_review_true_has_no_unimplemented_warn(self):
+        # artifact_review is advisory (the Inspector's artifact checks DO run);
+        # the fresh scaffold has it true and must not get the R8 WARN.
+        self.assertNotIn("inspection_review_unimplemented", self._codes())
+
     def test_goal_ref_missing_warns(self):
         self._edit("goal_ref: ../../goal.md", "goal_ref: ../../nope.md")
         self.assertIn("goal_ref_missing", self._codes(WARN))

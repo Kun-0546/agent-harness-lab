@@ -314,6 +314,27 @@ def _build_markdown(exp_dir: Path, spec: ExperimentSpec) -> str:
                  "judge never invents a verdict). Their verdicts are not final.")
     L.append("")
 
+    # ---- Methodology (how the numbers above were produced; plain text only) ----
+    L.append("## Methodology")
+    if spec.tracks:
+        method_of = {e.id: e.method for e in spec.evaluators if isinstance(e.id, str)}
+        for tr in spec.tracks:
+            evs = ", ".join(f"`{ref}` ({method_of.get(ref) or 'unknown'})"
+                            for ref in tr.evaluators) or "(no evaluators)"
+            L.append(f"- Track `{tr.id}` — evaluators: {evs}")
+    else:
+        L.append("- No evaluation tracks configured.")
+    L.append("- **Status meanings:** `passed` / `failed` are real evaluator verdicts; "
+             "`pending` means the evaluator did not run (a human annotation not yet "
+             "recorded, or `llm_judge` without `AHL_JUDGE_*` configured); `error` means "
+             "the evaluator could not produce a usable verdict — it is never counted "
+             "as a score.")
+    L.append("- **Score semantics:** `benchmark` scores come from the script's stdout "
+             "JSON (the scale is benchmark-defined; the shipped benchmarks use 0-1); "
+             "`llm_judge` scores are 0-100 as returned by the judge model; "
+             "`human_annotation` scores are read verbatim from the annotation file.")
+    L.append("")
+
     # Objective
     L.append("## Objective")
     if spec.objective and spec.objective.primary_track:

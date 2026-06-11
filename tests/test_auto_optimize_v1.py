@@ -6,7 +6,10 @@ bound the loop; optimization/history.jsonl is written. No LLM mutation.
 """
 import json
 import sys
+import tempfile
 import unittest
+from pathlib import Path
+from types import SimpleNamespace
 
 from agent_harness_lab import auto_optimize
 from agent_harness_lab.experiment_spec import parse_experiment_yaml
@@ -164,6 +167,56 @@ class TestAutoOptimize(unittest.TestCase):
             res = auto_optimize.run_optimization(exp, _spec(exp))
             self.assertEqual(res.stopped_by, "no_improvement")
             self.assertEqual(len(res.iterations), 2)
+
+
+class TestConfigFormPinning(unittest.TestCase):
+    """Pin the previously untested stop_conditions / promotion_policy config forms
+    (R3 precondition: nailed down BEFORE the exit-code change consumes the
+    severity chain)."""
+
+    def test_parse_stops_no_improvement_value_key_fallback(self):
+        # {type: no_improvement, value: K} — `value` is the fallback for `patience`
+        opt = SimpleNamespace(stop_conditions=[{"type": "no_improvement", "value": 3}])
+        self.assertEqual(auto_optimize._parse_stops(opt), (auto_optimize._SAFETY_CAP, 3))
+
+    def test_parse_stops_single_key_forms(self):
+        # {max_iterations: N} / {no_improvement: K} single-key shorthand
+        opt = SimpleNamespace(stop_conditions=[{"max_iterations": 4}, {"no_improvement": 2}])
+        self.assertEqual(auto_optimize._parse_stops(opt), (4, 2))
+
+    def test_parse_promotion_block_on_issues_list_and_false(self):
+        got = auto_optimize._parse_promotion(
+            SimpleNamespace(promotion_policy={"block_on_issues": ["case_failure"]}))
+        self.assertEqual(got, (True, False, ["case_failure"]))
+        got = auto_optimize._parse_promotion(
+            SimpleNamespace(promotion_policy={"block_on_issues": False}))
+        self.assertEqual(got, (True, False, False))
+
+    def test_count_blocking_list_form_counts_by_type(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ev = Path(tmp)
+            (ev / "issues.jsonl").write_text(
+                '{"type":"case_failure","severity":"error"}\n'
+                '{"type":"empty_output","severity":"error"}\n'
+                '{"type":"missing_trace","severity":"warn"}\n', encoding="utf-8")
+            self.assertEqual(auto_optimize._count_blocking(ev, ["case_failure"]), 1)
+            self.assertEqual(
+                auto_optimize._count_blocking(ev, ["case_failure", "empty_output"]), 2)
+
+    def test_count_blocking_explicit_false_ignores_error_issues(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ev = Path(tmp)
+            (ev / "issues.jsonl").write_text(
+                '{"type":"case_failure","severity":"error"}\n', encoding="utf-8")
+            self.assertEqual(auto_optimize._count_blocking(ev, False), 0)
+
+    def test_count_blocking_truthy_counts_error_severity_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ev = Path(tmp)
+            (ev / "issues.jsonl").write_text(
+                '{"type":"case_failure","severity":"error"}\n'
+                '{"type":"missing_trace","severity":"warn"}\n', encoding="utf-8")
+            self.assertEqual(auto_optimize._count_blocking(ev, True), 1)
 
 
 if __name__ == "__main__":

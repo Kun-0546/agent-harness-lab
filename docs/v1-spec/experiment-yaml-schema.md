@@ -345,6 +345,26 @@ each `track.evaluators` entry must reference an existing evaluator id; each
 `track.evidence` entry must be a known evidence type; **no evaluators (and no
 `methods` shorthand) → ERROR**; **no tracks → WARN**.
 
+**human_annotation annotation JSON contract.** The runner ingests a JSON object
+with three fields: `passed` (**required, bool** — the verdict), `score`
+(optional, number), `detail` (optional, string). It looks for
+`evaluator.annotation` (relative to `evaluation.root`), else the drop-in
+`evidence/scores/<track_id>/<evaluator_id>.annotation.json`. No file →
+`pending` (never blocks). A file whose `passed` is missing or not a bool →
+`error` (a `score` alone is not a verdict), with the file path and the expected
+schema in the record's detail.
+
+**llm_judge runtime.** Judging needs `AHL_JUDGE_BASE_URL` / `AHL_JUDGE_MODEL` /
+`AHL_JUDGE_API_KEY` (no key → `pending`, never a fabricated verdict); the
+OpenAI-compatible `base_url` IS the provider abstraction — Anthropic and other
+providers connect through an OpenAI-compatible gateway; there is no
+per-provider protocol switch. `AHL_JUDGE_TIMEOUT` (seconds, default 180) bounds
+each judge request. The judge scores only trace records that carry a `response`
+field; the `script` connector's v1 traces record `input`/`exit_code`/`ok` but
+no `response`, so a configured judge over script-connector evidence reports
+`error` (trace records exist but 0 judgeable units) instead of staying silently
+`pending`.
+
 Backward-compatible shorthand (still accepted, but `evaluators` + `tracks` is preferred):
 
 ```yaml
@@ -453,6 +473,17 @@ inspection:
     - path_drift
     - runtime_mismatch
 ```
+
+v1 execution semantics (honest status of these switches):
+
+- `skill_review` / `memory_review` / `context_review` are **declarable-only** in
+  v1: no such review is executed. Declaring one as `true` makes `hlab review`
+  WARN `declared but not executed in v1` (`inspection_review_unimplemented`).
+- `artifact_review` and `issue_checks` are currently **advisory**: the Inspector
+  always runs its fixed check set over the collected evidence regardless of
+  these values. They document intent and drive review coherence warnings (e.g.
+  an issue check whose evidence `collection` disables); they do not gate which
+  checks execute.
 
 Allowed issue checks for v1:
 

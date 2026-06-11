@@ -13,7 +13,8 @@ Bounded by design:
                      Run with file-redirected stdout + proc.wait(timeout) + a
                      process-group sweep (same hardening as the script connector),
                      so a misbehaving evaluator can never hang or orphan.
-  - human_annotation — NO interactive UI. If an annotation file exists, ingest it;
+  - human_annotation — NO interactive UI. If an annotation file exists, ingest it
+                     (`passed` must be a bool; missing or non-bool → `error`);
                      else write a `pending` record (never blocks).
   - llm_judge      — pending without AHL_JUDGE_API_KEY (it never invents a verdict);
                      with AHL_JUDGE_* set it judges each (harness, case) via llm.chat,
@@ -53,6 +54,12 @@ try:
     _EVAL_TIMEOUT = float(os.environ.get("AHL_EVAL_TIMEOUT", "60"))
 except ValueError:
     _EVAL_TIMEOUT = 60.0
+
+# llm_judge per-request timeout (seconds); default mirrors llm.chat's own 180s.
+try:
+    _JUDGE_TIMEOUT = float(os.environ.get("AHL_JUDGE_TIMEOUT", "180"))
+except ValueError:
+    _JUDGE_TIMEOUT = 180.0
 
 
 @dataclass
@@ -226,12 +233,22 @@ def _run_human(ev: EvaluatorSpec, track_id: str, exp_dir: Path,
     if ann is not None:
         try:
             data = json.loads(_read_text(ann))
-            out.status = PASSED if data.get("passed") else FAILED
-            out.score = data.get("score") if isinstance(data.get("score"), (int, float)) else None
-            out.detail = str(data.get("detail", "ingested human annotation"))
         except json.JSONDecodeError:
             out.status = ERROR
             out.detail = f"human annotation file is not JSON: {ann}"
+        else:
+            passed = data.get("passed") if isinstance(data, dict) else None
+            if isinstance(passed, bool):
+                out.status = PASSED if passed else FAILED
+                out.score = data.get("score") if isinstance(data.get("score"), (int, float)) else None
+                out.detail = str(data.get("detail", "ingested human annotation"))
+            else:
+                # honesty contract (same as llm_judge): a score alone is not a
+                # verdict — surface ERROR, never a silent FAILED.
+                out.status = ERROR
+                out.detail = (f'annotation missing boolean "passed": {ann} '
+                              '(expected JSON {"passed": bool, "score"?: number, '
+                              '"detail"?: string})')
     else:
         out.detail = "awaiting human annotation (no annotation file found)"
     rec = {"track_id": track_id, "evaluator_id": ev.id, "method": ev.method,
@@ -245,10 +262,13 @@ def _run_human(ev: EvaluatorSpec, track_id: str, exp_dir: Path,
 
 # --- llm_judge: real LLM-based judging --------------------------------------
 # Reuses the stdlib `llm.chat` client (no new dependency). Config mirrors grader.py:
-# AHL_JUDGE_BASE_URL / AHL_JUDGE_MODEL / AHL_JUDGE_API_KEY. Honesty contract:
+# AHL_JUDGE_BASE_URL / AHL_JUDGE_MODEL / AHL_JUDGE_API_KEY; AHL_JUDGE_TIMEOUT
+# (seconds, default 180) bounds each judge request. Honesty contract:
 #   - no AHL_JUDGE_API_KEY        -> PENDING (offline; never a fabricated verdict)
 #   - request fails/times out/5xx -> ERROR  (surfaced, not silently pending)
 #   - unparseable model reply     -> ERROR  (keeps a raw_response preview)
+#   - traces but 0 judgeable units-> ERROR  (no `response` field to judge; the
+#                                    script connector records none in v1)
 
 def _judge_config() -> tuple[str, str, str]:
     return (os.environ.get("AHL_JUDGE_BASE_URL", ""),
@@ -323,6 +343,19 @@ def _run_llm_judge(ev: EvaluatorSpec, track_id: str, exp_dir: Path, eval_root: P
     # one judged unit per (harness, case) — every trace record that has a response
     units = [r for recs in traces.values() for r in recs
              if isinstance(r, dict) and r.get("response") is not None]
+    if not units and any(traces.values()):
+        # honesty contract: trace records exist but none carries a `response`
+        # (the script connector's v1 trace records input/exit_code/ok only) —
+        # a configured judge must surface that, not stay silently pending forever.
+        detail = ("llm_judge: trace records exist but none carries a `response` "
+                  "field — 0 judgeable units (the script connector does not record "
+                  "a response in v1)")
+        rec = {"track_id": track_id, "evaluator_id": ev.id, "method": ev.method,
+               "status": ERROR, "score": None, "detail": detail,
+               "rubric": ev.rubric, "created_by": "EvaluationRunner"}
+        _write_jsonl(records_path, [rec])
+        return EvaluatorOutcome(track_id, ev.id or "?", ev.method, ERROR,
+                                detail=detail, records_path=str(records_path))
 
     records: list[dict] = []
     statuses: list[str] = []
@@ -336,7 +369,8 @@ def _run_llm_judge(ev: EvaluatorSpec, track_id: str, exp_dir: Path, eval_root: P
         try:
             raw = llm.chat(base, model, key,
                            _build_judge_prompt(rubric_text, case_input, agent_output,
-                                               evidence_summary))
+                                               evidence_summary),
+                           timeout=_JUDGE_TIMEOUT)
         except Exception as e:  # noqa: BLE001 — request failed/timeout/5xx after retries
             rec.update({"status": ERROR, "score": None,
                         "detail": f"llm_judge request failed: {e}"})

@@ -14,6 +14,12 @@ What the commands cover in v1:
 - evidence / evaluation / report — `status` shows evidence and evaluation state;
   `report` builds reports/report.md from the collected evidence.
 
+Exit codes (v1 contract): 0 success / 1 configuration or preflight error /
+2 not implemented / 3 runtime failure (any error-severity issue, or any
+evaluation track whose status is `error`). Pending evaluations (no judge key /
+no annotation yet), failed evaluations ("the answer is a failure" is a
+legitimate result) and warn/info-level issues do NOT fail the run.
+
 Runs on Python 3.10-3.12. Modules in the package that are not reached by this CLI
 surface are internal and not part of the public API.
 """
@@ -101,10 +107,11 @@ def cmd_new(args: argparse.Namespace) -> int:
               "remove it and run `hlab init`.", file=sys.stderr)
         return 1
     template = getattr(args, "template", None)
+    question = getattr(args, "question", None)
     try:
         result = scaffold.new_experiment(
             root, args.name, run_mode=args.mode, execution_mode=args.execution,
-            template=template)
+            question=question, template=template)
     except KeyError:
         print(f"Unknown template: {template!r}. Available templates: "
               f"{', '.join(sorted(scaffold.TEMPLATES)) or '(none)'}", file=sys.stderr)
@@ -116,6 +123,9 @@ def cmd_new(args: argparse.Namespace) -> int:
     note = f"  (name normalized to id '{eid}')" if eid != args.name else ""
     if template:
         print(f"Created experiment from template '{template}': experiments/{eid}{note}")
+        if question:
+            print("  (--question is ignored with --template: the template defines "
+                  "its own question)")
         print(f"  {result.experiment_dir}")
         print("  A complete, runnable A/B experiment was generated "
               "(harnesses, runtimes, cases, and a deterministic benchmark).")
@@ -140,7 +150,10 @@ def cmd_new(args: argparse.Namespace) -> int:
     print("    reports/             — generated reports")
     print("    conclusion.md        — human conclusion")
     print()
-    print(f"Next: edit the templates, then `hlab review experiments/{eid}`")
+    q_hint = "" if question else " — fill `question:` in experiment.yaml (or pass --question)"
+    print(f"Next: edit the templates{q_hint}, then:")
+    print(f"      hlab review experiments/{eid}")
+    print(f"      hlab run    experiments/{eid}")
     return 0
 
 
@@ -162,13 +175,79 @@ def cmd_review(args: argparse.Namespace) -> int:
     _print_review(report)
     if report.verdict == PASS:
         print("  OK — no problems found.")
+        print(f"Next: hlab run {args.experiment}")
         return 0
     if report.verdict == WARN:
         print(f"  {len(report.warnings)} warning(s); experiment may still run.")
+        print(f"Next: address the warning(s), or proceed with `hlab run {args.experiment}`.")
         return 0
     # ERROR
     print(f"  {len(report.errors)} error(s) must be fixed before running.")
+    print(f"Next: fix the error(s), then run `hlab review {args.experiment}` again.")
     return 1
+
+
+# --- run-failure judgement (the exit-code contract) ---------------------------
+
+def _runtime_failure_exit(issues: list[dict], track_statuses: list[tuple[str, str]],
+                          *, evidence_ref: str = "evidence/") -> int:
+    """The unified exit-3 judgement: 3 on any severity==error issue
+    (HLAB_RUNTIME_FAILURE) or any evaluation track with status==error
+    (HLAB_EVAL_ERROR); else 0. Exempt by contract: pending tracks (no judge key /
+    no annotation yet), failed tracks (a failed experiment answer is a legitimate
+    result), and warn/info-level issues. On failure, machine-readable HLAB_*
+    error codes go to stderr (the exit code routes a loop gate; the code names
+    the branch for an agent)."""
+    error_issues = [i for i in issues if isinstance(i, dict) and i.get("severity") == "error"]
+    error_tracks = [tid for tid, status in track_statuses if status == "error"]
+    if not error_issues and not error_tracks:
+        return 0
+    if error_issues:
+        counts: dict[str, int] = {}
+        for i in error_issues:
+            t = str(i.get("type") or "unknown")
+            counts[t] = counts.get(t, 0) + 1
+        detail = ", ".join(f"{t}={n}" for t, n in sorted(counts.items()))
+        print(f"HLAB_RUNTIME_FAILURE: {len(error_issues)} error-severity issue(s) "
+              f"({detail}) — see {evidence_ref}issues.jsonl", file=sys.stderr)
+    if error_tracks:
+        print(f"HLAB_EVAL_ERROR: {len(error_tracks)} evaluation track(s) errored "
+              f"({', '.join(sorted(error_tracks))}) — see {evidence_ref}scores/tracks/",
+              file=sys.stderr)
+    return 3
+
+
+def _track_statuses(evidence_dir: Path) -> list[tuple[str, str]]:
+    """[(track_id, status)] from an evidence dir's aggregated track files."""
+    out: list[tuple[str, str]] = []
+    tracks_dir = evidence_dir / "scores" / "tracks"
+    if not tracks_dir.is_dir():
+        return out
+    for p in sorted(tracks_dir.glob("*.json")):
+        try:
+            d = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        out.append((str(d.get("track_id") or p.stem), str(d.get("status") or "")))
+    return out
+
+
+def _optimize_final_evidence_dir(exp_dir: Path, opt_res) -> Path | None:
+    """The evidence dir that represents the FINAL incumbent — the Auto Optimize
+    exit judges that, never the union of all iterations. It is the last PROMOTED
+    iteration's evidence (that candidate is the incumbent now); with zero
+    promotions the incumbent never changed, so fall back to the last iteration
+    that actually ran (mutation-rejected iterations leave no evidence). None if
+    no iteration ran at all."""
+    promoted = last = None
+    for ir in opt_res.iterations:
+        ev = exp_dir / "optimization" / "iterations" / f"iter-{ir.iteration:03d}" / "evidence"
+        if not ev.is_dir():
+            continue
+        last = ev
+        if ir.promoted:
+            promoted = ev
+    return promoted if promoted is not None else last
 
 
 def cmd_run(args: argparse.Namespace) -> int:
@@ -220,8 +299,14 @@ def cmd_run(args: argparse.Namespace) -> int:
                   f"stopped by {opt_res.stopped_by}")
             print(f"  - incumbent harness: {opt_res.incumbent_dir}")
             print(f"  - history: {exp_dir / 'optimization' / 'history.jsonl'}")
-            print(f"  - generate the report with: hlab report {args.experiment}")
-            return 0
+            print(f"Next: hlab report {args.experiment}")
+            final_ev = _optimize_final_evidence_dir(exp_dir, opt_res)
+            if final_ev is None:
+                return 0  # no iteration ran (e.g. every mutation was rejected)
+            return _runtime_failure_exit(
+                inspector._read_issues(final_ev / "issues.jsonl"),
+                _track_statuses(final_ev),
+                evidence_ref=f"optimization/iterations/{final_ev.parent.name}/evidence/")
         res = auto.run_auto(exp_dir, spec)
         print(f"Auto Mode (run.mode=auto, execution.mode={spec.execution_mode}):")
         print(f"  - dispatched {res.dispatched} case run(s) "
@@ -261,8 +346,10 @@ def cmd_run(args: argparse.Namespace) -> int:
         insp = inspector.run_inspection(exp_dir, spec)
         print(f"  - inspection: +{len(insp.added)} issue(s) → {insp.issue_total} total "
               f"{insp.severity_counts()}")
-        print(f"  - generate the report with: hlab report {args.experiment}")
-        return 0
+        print(f"Next: hlab report {args.experiment}")
+        # exit-code contract: judge the merged issue set + the evaluated tracks
+        return _runtime_failure_exit(
+            insp.issues, [(t.track_id, t.status) for t in ev_result.tracks])
 
     # Any other run.mode is not executable in v1.
     print(f"run: {exp_dir}  (run.mode={spec.run_mode}, execution.mode={spec.execution_mode})",
@@ -373,6 +460,13 @@ def cmd_status(args: argparse.Namespace) -> int:
     print(f"issues:          {issue_count}")
     print(f"report:          {'reports/report.md present' if report_md else 'none'}")
     print(f"conclusion:      {'present' if conclusion else 'missing'}")
+    if not evidence_has:
+        print(f"Next: hlab run {args.experiment}")
+    elif not report_md:
+        print(f"Next: hlab report {args.experiment}")
+    else:
+        print(f"Next: hlab compare {args.experiment}, then `hlab conclude "
+              f"{args.experiment} --winner <id> --reason \"...\"`.")
     return 0
 
 
@@ -455,55 +549,103 @@ def cmd_conclude(args: argparse.Namespace) -> int:
         print(f"  - winner: {args.winner}")
     print("  - this is your decision, not a generated verdict")
     print(f"  - `hlab review {args.experiment}` will no longer warn conclusion_missing")
+    print("Next: the experiment loop is complete — start the next one with `hlab new <name>`.")
     return 0
 
 
 # --- parser / entry ----------------------------------------------------------
 
+# The object model in one sentence, then the loop stages — the top-level help is
+# the first contact with the tool, so it must teach the model, not list verbs.
+_CLI_DESCRIPTION = """\
+Agent Harness Lab: run goal-driven harness experiments on real Agent Runtimes.
+
+hlab has exactly two objects: the WORKSPACE and the EXPERIMENT. `hlab init`
+creates the workspace; every other command acts on one experiment directory
+(experiments/<name> — addressable as a path or a bare name).
+"""
+
+_CLI_EPILOG = """\
+the experiment loop (commands by stage):
+  prepare           init, new
+  gate & execute    review, run, status
+  conclude          report, compare, conclude
+
+exit codes:
+  0  success
+  1  configuration / preflight error
+  2  not implemented in v1
+  3  runtime failure (an error-severity issue, or an evaluation track in `error`)
+"""
+
+_EXPERIMENT_ARG_HELP = "experiments/<name>, a path, or the bare experiment name"
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="hlab",
-        description="Agent Harness Lab: run goal-driven harness experiments on "
-                    "real Agent Runtimes.",
+        description=_CLI_DESCRIPTION,
+        epilog=_CLI_EPILOG,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     sub = parser.add_subparsers(dest="command", metavar="<command>")
 
-    p_init = sub.add_parser("init", help="initialize a workspace (goal.md, evaluation-methods/, experiments/, .hlab/)")
+    # prepare ------------------------------------------------------------------
+    p_init = sub.add_parser(
+        "init",
+        help="create the workspace in the current directory "
+             "(goal.md, evaluation-methods/, experiments/, .hlab/)")
     p_init.set_defaults(func=cmd_init)
 
-    p_new = sub.add_parser("new", help="create an experiment", allow_abbrev=False)
-    p_new.add_argument("name", help="experiment name -> experiments/<name>/")
+    p_new = sub.add_parser(
+        "new", allow_abbrev=False,
+        help="<name>: create the experiment experiments/<name>/ "
+             "(--mode, --execution, --question, --template)")
+    p_new.add_argument("name", metavar="<name>", help="experiment name -> experiments/<name>/")
     p_new.add_argument("--mode", choices=["copilot", "auto"], default="copilot",
                        help="run mode (default: copilot)")
     p_new.add_argument("--execution", choices=["ab", "sequential", "longitudinal", "replay"],
                        default="ab", help="execution mode (default: ab)")
+    p_new.add_argument("--question", metavar="TEXT",
+                       help="the one-line experiment question, written into experiment.yaml "
+                            "(otherwise a <placeholder> is scaffolded and `hlab review` warns)")
     p_new.add_argument("--template", metavar="NAME",
                        help="scaffold a complete, runnable experiment from a built-in "
                             "template (e.g. memory-policy-ab-lite)")
     p_new.set_defaults(func=cmd_new)
 
-    p_review = sub.add_parser("review", help="review an experiment before run (PASS/WARN/ERROR)")
-    p_review.add_argument("experiment", help="experiments/<name> or <name>")
+    # gate & execute -----------------------------------------------------------
+    p_review = sub.add_parser(
+        "review", help="<experiment>: gate it before run — PASS / WARN / ERROR")
+    p_review.add_argument("experiment", metavar="<experiment>", help=_EXPERIMENT_ARG_HELP)
     p_review.set_defaults(func=cmd_review)
 
-    p_run = sub.add_parser("run", help="run or prepare an experiment (per run.mode)")
-    p_run.add_argument("experiment", help="experiments/<name> or <name>")
+    p_run = sub.add_parser(
+        "run", help="<experiment>: execute it (Auto Mode) or render its "
+                    "agent-task.md (Copilot Mode)")
+    p_run.add_argument("experiment", metavar="<experiment>", help=_EXPERIMENT_ARG_HELP)
     p_run.set_defaults(func=cmd_run)
 
-    p_status = sub.add_parser("status", help="show experiment status and evidence state")
-    p_status.add_argument("experiment", help="experiments/<name> or <name>")
+    p_status = sub.add_parser(
+        "status", help="<experiment>: show its spec, evidence, and evaluation state")
+    p_status.add_argument("experiment", metavar="<experiment>", help=_EXPERIMENT_ARG_HELP)
     p_status.set_defaults(func=cmd_status)
 
-    p_report = sub.add_parser("report", help="generate or refresh reports")
-    p_report.add_argument("experiment", help="experiments/<name> or <name>")
+    # conclude -----------------------------------------------------------------
+    p_report = sub.add_parser(
+        "report", help="<experiment>: build reports/report.md (+ .html) from its evidence")
+    p_report.add_argument("experiment", metavar="<experiment>", help=_EXPERIMENT_ARG_HELP)
     p_report.set_defaults(func=cmd_report)
 
-    p_compare = sub.add_parser("compare", help="summarize an A/B run into reports/compare.json")
-    p_compare.add_argument("experiment", help="experiments/<name> or <name>")
+    p_compare = sub.add_parser(
+        "compare", help="<experiment>: summarize its A/B result into reports/compare.json")
+    p_compare.add_argument("experiment", metavar="<experiment>", help=_EXPERIMENT_ARG_HELP)
     p_compare.set_defaults(func=cmd_compare)
 
-    p_conclude = sub.add_parser("conclude", help="record the human conclusion as conclusion.md")
-    p_conclude.add_argument("experiment", help="experiments/<name> or <name>")
+    p_conclude = sub.add_parser(
+        "conclude", help="<experiment>: record YOUR decision as conclusion.md "
+                         "(--winner, --reason)")
+    p_conclude.add_argument("experiment", metavar="<experiment>", help=_EXPERIMENT_ARG_HELP)
     p_conclude.add_argument("--winner", metavar="ID", help="the harness id you chose (e.g. B)")
     p_conclude.add_argument("--reason", help="one-line reason for the decision")
     p_conclude.set_defaults(func=cmd_conclude)
@@ -528,14 +670,17 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def ahl_redirect(argv: list[str] | None = None) -> int:
-    """Entry point for the retired `ahl` command — friendly migration message.
+    """Entry point for the retired `ahl` command — an honest stop, not a shim.
 
-    Does not run old semantics (meaning changed in v1)."""
+    Does not run old semantics (meaning changed in v1), and does not pretend the
+    old arguments map onto `hlab` — the two stacks are not compatible."""
     _utf8_streams()
-    rest = " ".join(sys.argv[1:]) if len(sys.argv) > 1 else "<command>"
-    print("The `ahl` command has been replaced by `hlab` (Agent Harness Lab v1).",
-          file=sys.stderr)
-    print(f"Please use: hlab {rest}", file=sys.stderr)
-    print("Run `hlab --help` for the v1 command surface "
-          "(init / new / review / run / status / report / compare / conclude).", file=sys.stderr)
+    print("`ahl` (the v0.x stack) is retired and no longer runs.", file=sys.stderr)
+    print("Its successor is `hlab` (Agent Harness Lab v1), but the two stacks' "
+          "workspace formats are NOT compatible:", file=sys.stderr)
+    print("an `ahl` workspace cannot be opened by `hlab`, and old `ahl` commands "
+          "do not map 1:1 onto the v1 surface.", file=sys.stderr)
+    print("Start fresh with `hlab init` + `hlab --help`; see the README's "
+          "'Command surface' section for the v1 loop. A migration guide "
+          "(migrating-from-ahl.md) is planned for v1.1.", file=sys.stderr)
     return 1
