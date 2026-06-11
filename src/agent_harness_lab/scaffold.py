@@ -2,8 +2,10 @@
 
 Public term is `harness` throughout. `hlab init` builds the workspace;
 `hlab new` builds an experiment tree whose experiment.yaml is a valid minimal
-spec that reviews with no ERROR (Auto Mode with a not-yet-implemented state
-policy may WARN).
+spec that reviews with no ERROR (the scaffold's `<...>` placeholder question
+WARNs until replaced — pass a real question to avoid it; Auto Mode with a
+not-yet-implemented state policy may also WARN). Auto Mode scaffolds a runnable
+PLACEHOLDER echo agent per harness so review -> run works out of the box.
 """
 from __future__ import annotations
 
@@ -11,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from agent_harness_lab.experiment_spec import make_experiment_id
-from agent_harness_lab.experiment_templates import TEMPLATES
+from agent_harness_lab.experiment_templates import TEMPLATES, detect_python_command
 
 # --- workspace-level templates ----------------------------------------------
 
@@ -230,6 +232,7 @@ inspection:
 reports:
   formats:
     - md
+    - html
 
 # Auto Optimize (the second Auto Mode layer) — a bounded, deterministic
 # (copy-only / script-based) candidate -> evaluate -> promote loop. It IS
@@ -249,8 +252,9 @@ reports:
 #   stop_conditions:
 #     - max_iterations: 5
 #   promotion_policy:
-#     promote_if_track: skill-artifact
-#     reject_if_issue: case_failure
+#     require_primary_track_passed: true
+#     block_on_issues:
+#       - case_failure
 """
 
 AGENT_RUNTIME_TEMPLATE = """# Agent Runtime spec for "{runtime_id}".
@@ -286,6 +290,65 @@ artifacts:
       glob: "outputs/skill/**"
       required: true
 """
+
+# Auto Mode runtime spec — a RUNNABLE default. working_dir points at the harness
+# directory (same shape as the built-in template) and `command` runs the
+# scaffolded PLACEHOLDER echo agent with the interpreter probed at generation
+# time, so `hlab new --mode auto` -> review -> run works out of the box.
+AUTO_AGENT_RUNTIME_TEMPLATE = """# Agent Runtime spec for "{runtime_id}".
+# An Agent Runtime is the real environment the tested agent runs in. This file
+# tells AHL how to drive it. The scaffolded command runs harnesses/{hid}/agent.py
+# — a PLACEHOLDER echo agent; replace it with your real agent.
+
+id: {runtime_id}
+
+connector:
+  # Auto Mode v1 executes `local_cli` and `script` connectors.
+  type: {connector_type}
+
+  # stdin_json: AHL sends one JSON object per line ({{"input": ...}}) and reads
+  # one JSON object per line ({{"response": ...}}) from the agent's stdout.
+  command: '{command}'
+  working_dir: "./harnesses/{hid}"   # resolved relative to the experiment dir
+  input_mode: stdin_json
+  timeout: 60                        # per-turn seconds before a connector failure
+
+# Artifacts the runtime may produce. Declare only WHAT (id / kind / glob /
+# required); AHL's EvidenceCollector archives matches under evidence/artifacts/.
+# `glob` is relative to connector.working_dir. The echo agent writes
+# produced/answer.txt per case.
+artifacts:
+  collect:
+    - id: echo_answer
+      kind: text
+      glob: "produced/**"
+      required: false
+"""
+
+# PLACEHOLDER echo agent written into each harness dir by `hlab new --mode auto`
+# (~15 lines). Every response carries a loud PLACEHOLDER marker so a report built
+# on the unedited scaffold can never be mistaken for a real experiment result.
+# __HID__ is substituted via str.replace (the body is brace-heavy; no str.format).
+ECHO_AGENT_TEMPLATE = '''"""PLACEHOLDER echo agent (harness __HID__) — replace with your real agent.
+
+stdin_json contract: reads {"input": ...} per line, replies {"response": ...}.
+"""
+import json
+import os
+import sys
+
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    text = str(json.loads(line).get("input", ""))
+    answer = "[PLACEHOLDER harness __HID__] echo: " + text
+    os.makedirs("produced", exist_ok=True)
+    with open("produced/answer.txt", "w", encoding="utf-8") as f:
+        f.write(answer)
+    sys.stdout.write(json.dumps({"response": answer}) + "\\n")
+    sys.stdout.flush()
+'''
 
 HARNESS_README_TEMPLATE = """# Harness {hid}
 
@@ -356,14 +419,40 @@ write evidence/.
 Line them up with the `inspection.issue_checks` in experiment.yaml.>
 """
 
-BENCHMARK_SEED_TEMPLATE = '''"""Benchmark evaluator: artifact_exists (placeholder).
+BENCHMARK_SEED_TEMPLATE = '''"""Benchmark evaluator: artifact_exists (seed).
 
-A benchmark is a deterministic, scriptable check (pass/fail or a metric). This
-runs at the Evaluation phase (later) over collected evidence under evidence/ and
-records a score. Replace the body with the real check.
+A benchmark is a deterministic, scriptable check (pass/fail or a metric). AHL
+runs it with a JSON context file as argv[1] ({"evidence_dir", "traces", "cases",
+...}) and reads ONE JSON object from stdout ({"records": [...]} or {"passed":
+...}). This seed REALLY checks that every traced (harness, case) collected at
+least one artifact file under evidence/artifacts/ — a runnable starting point;
+replace it with the real check for your experiment.
 """
-# TODO: inspect evidence/artifacts/ for the expected skill artifact and decide
-# pass/fail, then write a score record under evidence/scores/.
+import json
+import sys
+from pathlib import Path
+
+
+def main():
+    ctx = json.load(open(sys.argv[1], encoding="utf-8"))
+    art_root = Path(ctx["evidence_dir"]) / "artifacts"
+    records = []
+    for runtime_id, recs in ctx.get("traces", {}).items():
+        for r in recs:
+            if not isinstance(r, dict):
+                continue
+            cid = r.get("case_id")
+            case_dir = art_root / str(runtime_id) / str(cid)
+            produced = case_dir.is_dir() and any(p.is_file() for p in case_dir.rglob("*"))
+            records.append({"case_id": cid, "harness_id": r.get("harness_id"),
+                            "passed": produced, "score": 1.0 if produced else 0.0,
+                            "detail": ("artifact collected" if produced
+                                       else "no artifact collected for this case")})
+    print(json.dumps({"records": records}))
+
+
+if __name__ == "__main__":
+    main()
 '''
 
 RUBRIC_SKILL_QUALITY_TEMPLATE = """# Rubric: skill_quality (llm_judge)
@@ -382,8 +471,11 @@ A human reads the produced skill + its trace and records a verdict. Use for the
 judgments you will not delegate.
 
 - What to read: evidence/artifacts/<runtime>/, evidence/traces/<runtime>.jsonl
-- Verdict to record: <accept / revise / reject> + one-line rationale
-- Record under: evidence/inspections/
+- Verdict to record: a JSON object
+  `{"passed": true|false, "score": <number, optional>, "detail": "<one-line rationale>"}`
+  — `passed` MUST be a boolean; a `score` alone is not a verdict (missing or
+  non-bool `passed` makes the evaluator report `error`).
+- Record at: evidence/scores/<track_id>/<evaluator_id>.annotation.json
 """
 
 CONCLUSION_MD_TEMPLATE = """# Conclusion — {id}
@@ -526,10 +618,23 @@ def new_experiment(root: Path, name: str, run_mode: str = "copilot",
     # Auto Mode → local_cli (a v1-supported connector). Never default to
     # remote_devbox/api/bridge.
     connector_type = "manual" if run_mode == "copilot" else "local_cli"
-    _write("agent-runtimes/runtime-a.yaml",
-           AGENT_RUNTIME_TEMPLATE.format(runtime_id="runtime-a", connector_type=connector_type))
-    _write("agent-runtimes/runtime-b.yaml",
-           AGENT_RUNTIME_TEMPLATE.format(runtime_id="runtime-b", connector_type=connector_type))
+    if connector_type == "manual":
+        _write("agent-runtimes/runtime-a.yaml",
+               AGENT_RUNTIME_TEMPLATE.format(runtime_id="runtime-a", connector_type=connector_type))
+        _write("agent-runtimes/runtime-b.yaml",
+               AGENT_RUNTIME_TEMPLATE.format(runtime_id="runtime-b", connector_type=connector_type))
+    else:
+        # Auto Mode: a runnable PLACEHOLDER echo agent per harness, and runtime
+        # specs whose working_dir points at harnesses/<HID>/ (same shape as the
+        # built-in template). The interpreter is probed at generation time so the
+        # written command is what actually runs on this machine.
+        command = f"{detect_python_command()} agent.py"
+        for rtid, hid in (("runtime-a", "A"), ("runtime-b", "B")):
+            _write(f"harnesses/{hid}/agent.py", ECHO_AGENT_TEMPLATE.replace("__HID__", hid))
+            _write(f"agent-runtimes/{rtid}.yaml",
+                   AUTO_AGENT_RUNTIME_TEMPLATE.format(
+                       runtime_id=rtid, connector_type=connector_type,
+                       hid=hid, command=command))
     # cases
     _write("cases/cases.jsonl", CASES_JSONL_SEED)
     _mkdir("cases/datasets")

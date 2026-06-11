@@ -10,6 +10,8 @@ from pathlib import Path
 from agent_harness_lab import cli, scaffold
 from agent_harness_lab.reviewer import ERROR, PASS, WARN, review_experiment
 
+_Q = "Does harness B beat harness A?"  # a real (non-placeholder) question
+
 
 @contextmanager
 def workspace_with_experiment(name="demo", **kw):
@@ -27,13 +29,22 @@ def workspace_with_experiment(name="demo", **kw):
 
 
 class TestReviewVerdicts(unittest.TestCase):
-    def test_fresh_experiment_passes(self):
-        with workspace_with_experiment() as (_root, exp):
+    def test_fresh_experiment_passes_with_real_question(self):
+        with workspace_with_experiment(question=_Q) as (_root, exp):
             report = review_experiment(exp)
             self.assertEqual(report.verdict, PASS, [str(p) for p in report.problems])
 
+    def test_fresh_default_warns_only_placeholder_question(self):
+        # the scaffold's default `<...>` question is an unfilled placeholder (R4):
+        # review WARNs question_placeholder and nothing else fires.
+        with workspace_with_experiment() as (_root, exp):
+            report = review_experiment(exp)
+            self.assertEqual(report.verdict, WARN)
+            self.assertEqual(report.errors, [], [str(p) for p in report.errors])
+            self.assertEqual({p.code for p in report.warnings}, {"question_placeholder"})
+
     def test_cli_review_pass_exit_0(self):
-        with workspace_with_experiment() as (_root, _exp):
+        with workspace_with_experiment(question=_Q) as (_root, _exp):
             out = io.StringIO()
             with redirect_stdout(out):
                 rc = cli.main(["review", "experiments/demo"])
@@ -64,11 +75,11 @@ class TestReviewVerdicts(unittest.TestCase):
             self.assertIn("ERROR", out.getvalue())
 
     def test_html_format_does_not_warn(self):
-        # report.html now has a real stdlib renderer — requesting it must not warn.
-        with workspace_with_experiment() as (_root, exp):
-            y = exp / "experiment.yaml"
-            text = y.read_text(encoding="utf-8").replace("    - md\n", "    - md\n    - html\n")
-            y.write_text(text, encoding="utf-8")
+        # report.html has a real stdlib renderer — the default scaffold now requests
+        # `html` (R7) and that must not warn.
+        with workspace_with_experiment(question=_Q) as (_root, exp):
+            text = (exp / "experiment.yaml").read_text(encoding="utf-8")
+            self.assertIn("- html", text)  # scaffold default includes html
             report = review_experiment(exp)
             self.assertNotEqual(report.verdict, ERROR)
             self.assertFalse(any(p.code == "html_renderer_unavailable"
@@ -82,6 +93,34 @@ class TestReviewVerdicts(unittest.TestCase):
             self.assertEqual(report.verdict, ERROR)
             self.assertTrue(any(p.code == "auto_connector_unsupported" for p in report.errors))
 
+    def test_auto_fresh_scaffold_reviews_pass(self):
+        # R4: the auto scaffold ships a runnable echo agent whose working_dir exists,
+        # so with a real question a fresh auto experiment reviews PASS.
+        with workspace_with_experiment(name="autoy", run_mode="auto",
+                                       question=_Q) as (_root, exp):
+            report = review_experiment(exp)
+            self.assertEqual(report.verdict, PASS, [str(p) for p in report.problems])
+
+    def test_auto_missing_working_dir_error(self):
+        # R4: the runner's run-time working_dir check is left-shifted into review
+        # (auto + local_cli/script only).
+        with workspace_with_experiment(name="autoz", run_mode="auto",
+                                       question=_Q) as (_root, exp):
+            y = exp / "agent-runtimes" / "runtime-a.yaml"
+            y.write_text(y.read_text(encoding="utf-8").replace(
+                'working_dir: "./harnesses/A"', 'working_dir: "./nope"'), encoding="utf-8")
+            report = review_experiment(exp)
+            self.assertEqual(report.verdict, ERROR)
+            self.assertTrue(any(p.code == "auto_working_dir_missing" for p in report.errors))
+
+    def test_copilot_missing_working_dir_not_checked(self):
+        # the precheck is auto-only: the copilot scaffold's working_dir does not
+        # exist either, but a Copilot flow may create it right before the run.
+        with workspace_with_experiment(question=_Q) as (_root, exp):
+            report = review_experiment(exp)
+            self.assertFalse(any(p.code == "auto_working_dir_missing"
+                                 for p in report.problems))
+
     def test_review_experiment_not_found(self):
         with workspace_with_experiment() as (_root, _exp):
             rc = cli.main(["review", "experiments/does-not-exist"])
@@ -93,7 +132,7 @@ class TestReviewVerdicts(unittest.TestCase):
             self.assertEqual(rc, 1)
 
     def test_bare_name_not_shadowed_by_cwd_dir(self):
-        with workspace_with_experiment(name="exp-one") as (root, _exp):
+        with workspace_with_experiment(name="exp-one", question=_Q) as (root, _exp):
             (root / "exp-one").mkdir()  # decoy empty dir in cwd
             out = io.StringIO()
             with redirect_stdout(out):

@@ -59,6 +59,8 @@ KNOWN_TOPLEVEL = {
 }
 
 _KEBAB_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*\Z")  # \Z not $ — reject a trailing newline
+# an unfilled scaffold placeholder question: the whole string is <...> (any mode)
+_PLACEHOLDER_QUESTION_RE = re.compile(r"^<.*>$", re.DOTALL)
 
 ERROR = "ERROR"
 WARN = "WARN"
@@ -570,6 +572,11 @@ def validate_spec(spec: ExperimentSpec, experiment_dir: Path) -> list[Problem]:
         err("missing_question", "set `question:` in experiment.yaml (the one-line experiment question)")
     elif not isinstance(spec.question, str):
         err("bad_question", "`question` in experiment.yaml must be a string (quote it)")
+    elif _PLACEHOLDER_QUESTION_RE.match(spec.question):
+        warn("question_placeholder",
+             f"`question` in experiment.yaml still looks like an unfilled scaffold "
+             f"placeholder ({spec.question!r}); replace it with the real one-line "
+             f"experiment question")
 
     # goal_ref is optional, but if set it must resolve to a file (not silently dead)
     if spec.goal_ref:
@@ -706,6 +713,20 @@ def validate_spec(spec: ExperimentSpec, experiment_dir: Path) -> list[Problem]:
                 err("auto_connector_unsupported",
                     f"Auto Mode v1 supports {sorted(AUTO_V1_CONNECTORS)}; "
                     f"agent runtime {r.id} uses {rt.connector_type!r}")
+            else:
+                # left-shifted from the runner's run-time check: a missing
+                # working_dir would only surface as a connector_failure at run
+                # time; catch it at review instead. Auto only — a Copilot flow
+                # may legitimately create the directory just before the run.
+                _conn = rt.raw.get("connector") if isinstance(rt.raw, dict) else None
+                _conn = _conn if isinstance(_conn, dict) else {}
+                _wd = _conn.get("working_dir") or (
+                    rt.raw.get("working_dir") if isinstance(rt.raw, dict) else None) or "."
+                if isinstance(_wd, str) and not (experiment_dir / _wd).is_dir():
+                    err("auto_working_dir_missing",
+                        f"agent runtime {r.id}: connector working_dir '{_wd}' does not "
+                        f"exist relative to the experiment dir; create it or fix "
+                        f"`connector.working_dir` in '{r.spec}'")
 
         # artifacts.collect[]: user declares what artifacts the runtime may produce;
         # EvidenceCollector (Auto Mode phase) archives them under evidence/artifacts/.
@@ -1022,6 +1043,13 @@ def validate_spec(spec: ExperimentSpec, experiment_dir: Path) -> list[Problem]:
                 if not isinstance(v, bool):
                     err("bad_inspection_value",
                         f"`inspection.{k}` must be true/false in experiment.yaml; got {v!r}")
+                elif v and k != "artifact_review":
+                    # honesty (same pattern as simulator_roleplay_unimplemented):
+                    # skill/memory/context review are declarable-only in v1 — the
+                    # Inspector runs its fixed checks, never a dedicated <k>.
+                    warn("inspection_review_unimplemented",
+                         f"`inspection.{k}: true` is declared but not executed in v1 "
+                         f"(declarable-only); no {k} will be performed")
             else:
                 warn("unknown_inspection_key",
                      f"`inspection.{k}` in experiment.yaml is not a recognized key; "

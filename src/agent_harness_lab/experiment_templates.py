@@ -15,7 +15,30 @@ Currently shipped:
 """
 from __future__ import annotations
 
+import shutil
+import sys
+from pathlib import Path
+
 _ID = "__ID__"  # placeholder substituted with the experiment id (no str.format -> brace-safe)
+
+
+def detect_python_command() -> str:
+    """The interpreter token written into generated runtime YAML `command:` lines.
+
+    Generation-time probe — "what you see is what runs"; run time never
+    substitutes. Order: `python3` -> `python` -> the generating interpreter
+    itself. PATH hits under Windows' WindowsApps directory are excluded: they
+    are Microsoft Store app-execution-alias stubs that open the Store instead
+    of running Python. The fallback path is normalized to forward slashes (safe
+    for YAML scalars and the local_cli shlex.split) and double-quoted when it
+    contains spaces.
+    """
+    for name in ("python3", "python"):
+        hit = shutil.which(name)
+        if hit and "windowsapps" not in hit.replace("\\", "/").lower():
+            return name
+    exe = Path(sys.executable).as_posix()
+    return f'"{exe}"' if " " in exe else exe
 
 # --- memory-policy-ab-lite: shared agent input parser -----------------------
 # Both harnesses receive each case's `input` string verbatim (AHL sends only
@@ -471,8 +494,17 @@ relevant. The cases test that it still answers the relevant ones.
 
 def _memory_policy_ab_lite(experiment_id: str) -> dict[str, str]:
     """Return {relpath: content} for a complete, runnable memory-policy A/B experiment."""
+    # generation-time interpreter probe (the committed example keeps the canonical
+    # `python3`; generated specs get whatever actually runs on this machine)
+    interp = detect_python_command()
+
     def rt(rtid: str, hid: str) -> str:
-        return _RUNTIME.replace("__RTID__", rtid).replace("__HID__", hid)
+        text = _RUNTIME.replace("__RTID__", rtid).replace("__HID__", hid)
+        if interp != "python3":
+            # single-quoted so a quoted absolute-path fallback stays one YAML scalar
+            text = text.replace("command: python3 agent.py",
+                                f"command: '{interp} agent.py'")
+        return text
 
     return {
         "goal.md": _GOAL,

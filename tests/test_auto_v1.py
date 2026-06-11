@@ -251,7 +251,9 @@ class TestAutoLocalCli(unittest.TestCase):
         with _workspace() as ws:
             _setup(ws, agent=_SLEEP, required_artifact=False, timeout=1)
             rc, _, _ = _run_cli(["run", "experiments/demo"])
-            self.assertEqual(rc, 0)  # the run executed; the failure is recorded as an issue
+            # exit-code contract (R3): an error-severity connector_failure is a
+            # runtime failure → exit 3 (the issue is still recorded as evidence)
+            self.assertEqual(rc, 3)
             self.assertIn("connector_failure", _issue_types(ws / "experiments" / "demo"))
 
 
@@ -285,7 +287,9 @@ class TestAutoScript(unittest.TestCase):
             t0 = time.monotonic()
             rc, _, _ = _run_cli(["run", "experiments/demo"])
             elapsed = time.monotonic() - t0
-            self.assertEqual(rc, 0)
+            # exit-code contract (R3): the timeout is an error-severity
+            # connector_failure → exit 3 (still bounded, still recorded)
+            self.assertEqual(rc, 3)
             self.assertLess(elapsed, 25, "script timeout must be bounded, not wait the full sleep")
             self.assertIn("connector_failure", _issue_types(ws / "experiments" / "demo"))
 

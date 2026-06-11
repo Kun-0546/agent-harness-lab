@@ -19,14 +19,18 @@ pip install -e .          # provides the `hlab` command (and `python -m agent_ha
 
 ```text
 hlab init                  initialize a workspace (goal.md, evaluation-methods/, experiments/)
-hlab new <name>            scaffold an experiment (--mode copilot|auto, --execution ab|...)
+hlab new <name>            scaffold an experiment (--mode copilot|auto, --execution ab|..., --question)
 hlab review <experiment>   validate experiment.yaml before running (PASS / WARN / ERROR)
 hlab run <experiment>      Copilot: render agent-task.md · Auto: drive runtimes + collect evidence
 hlab status <experiment>   show status + evidence/evaluation state
-hlab report <experiment>   build reports/report.md from the evidence
+hlab report <experiment>   build reports/report.md (+ report.html) from the evidence
+hlab compare <experiment>  summarize the A/B result into reports/compare.json
+hlab conclude <experiment> record your decision as conclusion.md (--winner, --reason)
 ```
 
-`hlab <cmd>` and `python -m agent_harness_lab <cmd>` are equivalent.
+`hlab <cmd>` and `python -m agent_harness_lab <cmd>` are equivalent. Every command
+honors the exit-code contract in [`docs/v1-spec/cli.md`](v1-spec/cli.md): `0` success /
+`1` config or preflight error / `2` not implemented / `3` runtime failure.
 
 ## Run the Auto Run example (A/B: verbose vs concise)
 
@@ -62,6 +66,29 @@ Recommendation       B is stronger; a human decides in conclusion.md
 after reading the report. The `quality` track aggregates to `failed` because not every
 harness passes — normal for an A/B run; the per-harness comparison is the signal.)
 
+### report.html
+
+`report` always writes `reports/report.md`. When `html` is in `reports.formats`
+(the default `hlab new` scaffold and the `memory-policy-ab-lite` template include
+it; this demo keeps `md` only), it also writes `reports/report.html` — a real,
+self-contained render of the same report using only the stdlib, no dependency.
+
+## Close the loop: compare and conclude
+
+`report` summarizes; `compare` reduces the A/B result to machine-readable JSON;
+`conclude` records **your** decision — AHL never generates a verdict for you.
+
+```bash
+PYTHONPATH=../../src python -m agent_harness_lab compare  experiments/demo
+PYTHONPATH=../../src python -m agent_harness_lab conclude experiments/demo \
+  --winner B --reason "Concise answers passed every case; verbose failed all three."
+```
+
+`compare` writes `reports/compare.json` (winner, per-harness pass counts and
+scores, and a one-line reason) and prints the same summary to the console.
+`conclude` writes `conclusion.md`; after that, `hlab review` no longer warns
+`conclusion_missing` and the experiment loop is complete.
+
 ## Run the Auto Optimize example (bounded, deterministic)
 
 The bounded `candidate → evaluate → promote` loop in its simplest copy-only form.
@@ -78,9 +105,10 @@ get **2 iterations, 0 promotions, stopped by `max_iterations`**:
 ```text
 experiments/demo/optimization/
 ├── history.jsonl                       # one record per iteration
-└── iterations/iter-00N/
-    ├── iter-00N.json
-    └── evidence/                       # that iteration's traces / raw / scores / issues
+└── iterations/
+    ├── iter-00N.json                   # that iteration's record
+    └── iter-00N/
+        └── evidence/                   # that iteration's traces / raw / scores / issues
 ```
 
 To make a loop that actually improves the harness, add a `mutation_script` under

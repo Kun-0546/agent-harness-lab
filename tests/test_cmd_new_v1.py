@@ -106,6 +106,94 @@ class TestNew(unittest.TestCase):
             tmp.cleanup()
 
 
+class TestQuestionFlag(unittest.TestCase):
+    """hlab new --question fills `question:` so the scaffold needs no placeholder (R4)."""
+
+    def test_question_flag_written_to_yaml_no_placeholder_warn(self):
+        from agent_harness_lab.reviewer import review_experiment
+        with redirect_stdout(io.StringIO()), workspace() as ws:
+            rc = cli.main(["new", "qx", "--question",
+                           "Does retrieval filtering reduce leakage?"])
+            self.assertEqual(rc, 0)
+            spec = parse_experiment_yaml(ws / "experiments" / "qx" / "experiment.yaml")
+            self.assertEqual(spec.question, "Does retrieval filtering reduce leakage?")
+            rep = review_experiment(ws / "experiments" / "qx")
+            self.assertNotIn("question_placeholder", {p.code for p in rep.warnings})
+
+    def test_without_flag_scaffold_keeps_placeholder(self):
+        with redirect_stdout(io.StringIO()), workspace() as ws:
+            cli.main(["new", "qless"])
+            spec = parse_experiment_yaml(ws / "experiments" / "qless" / "experiment.yaml")
+            self.assertTrue(str(spec.question).startswith("<"),
+                            f"expected a <placeholder> question, got {spec.question!r}")
+
+    def test_question_with_template_is_ignored_with_note(self):
+        # templates define their own question; --question must not corrupt them
+        out = io.StringIO()
+        with redirect_stdout(out), workspace() as ws:
+            rc = cli.main(["new", "tq", "--template", "memory-policy-ab-lite",
+                           "--question", "ignored?"])
+            self.assertEqual(rc, 0)
+            text = (ws / "experiments" / "tq" / "experiment.yaml").read_text(encoding="utf-8")
+            self.assertNotIn("ignored?", text)
+        self.assertIn("--question is ignored with --template", out.getvalue())
+
+
+class TestAutoScaffoldRunnable(unittest.TestCase):
+    """--mode auto scaffolds a runnable PLACEHOLDER echo agent (R4)."""
+
+    def test_auto_new_writes_echo_agents_and_harness_working_dirs(self):
+        with redirect_stdout(io.StringIO()), workspace() as ws:
+            cli.main(["new", "autox", "--mode", "auto"])
+            exp = ws / "experiments" / "autox"
+            for hid, rtid in (("A", "runtime-a"), ("B", "runtime-b")):
+                agent = exp / "harnesses" / hid / "agent.py"
+                self.assertTrue(agent.is_file(), f"missing harnesses/{hid}/agent.py")
+                self.assertIn("PLACEHOLDER", agent.read_text(encoding="utf-8"))
+                rt = (exp / "agent-runtimes" / f"{rtid}.yaml").read_text(encoding="utf-8")
+                self.assertIn(f'working_dir: "./harnesses/{hid}"', rt)
+                self.assertIn("agent.py", rt)
+
+    def test_auto_runtime_command_uses_probed_interpreter(self):
+        from agent_harness_lab.experiment_templates import detect_python_command
+        with redirect_stdout(io.StringIO()), workspace() as ws:
+            cli.main(["new", "autoy", "--mode", "auto"])
+            rt = (ws / "experiments" / "autoy" / "agent-runtimes" / "runtime-b.yaml") \
+                .read_text(encoding="utf-8")
+            self.assertIn(f"command: '{detect_python_command()} agent.py'", rt)
+
+    def test_copilot_new_has_no_echo_agent(self):
+        # the copilot path is unchanged: manual connector, no scaffolded agent.py
+        with redirect_stdout(io.StringIO()), workspace() as ws:
+            cli.main(["new", "cop"])
+            exp = ws / "experiments" / "cop"
+            self.assertFalse((exp / "harnesses" / "A" / "agent.py").exists())
+            rt = (exp / "agent-runtimes" / "runtime-a.yaml").read_text(encoding="utf-8")
+            self.assertIn("type: manual", rt)
+            self.assertIn('working_dir: "./runtime-a"', rt)
+
+
+class TestYamlTemplateContent(unittest.TestCase):
+    """Scaffolded experiment.yaml content pinned: R7 html + E2 engine key names."""
+
+    def test_default_report_formats_include_html(self):
+        with redirect_stdout(io.StringIO()), workspace() as ws:
+            cli.main(["new", "demo"])
+            spec = parse_experiment_yaml(ws / "experiments" / "demo" / "experiment.yaml")
+            self.assertEqual(spec.report_formats, ["md", "html"])
+
+    def test_optimization_comment_names_engine_keys(self):
+        # E2 drift: the commented promotion_policy must use keys the engine
+        # actually parses (auto_optimize._parse_promotion), not invented ones.
+        with redirect_stdout(io.StringIO()), workspace() as ws:
+            cli.main(["new", "demo"])
+            text = (ws / "experiments" / "demo" / "experiment.yaml").read_text(encoding="utf-8")
+            self.assertIn("require_primary_track_passed", text)
+            self.assertIn("block_on_issues", text)
+            self.assertNotIn("promote_if_track", text)
+            self.assertNotIn("reject_if_issue", text)
+
+
 class TestNameHandling(unittest.TestCase):
     def test_name_normalized_to_kebab_id_used_as_dir(self):
         with redirect_stdout(io.StringIO()), workspace() as ws:
@@ -116,15 +204,20 @@ class TestNameHandling(unittest.TestCase):
             self.assertEqual(spec.id, "my-cool-exp")  # dir name == id, no divergence
 
     def test_digit_only_and_reserved_names_review_clean(self):
-        from agent_harness_lab.reviewer import PASS, review_experiment
+        from agent_harness_lab.reviewer import review_experiment
         for nm in ("007", "yes", "null"):
             with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()), workspace() as ws:
                 rc = cli.main(["new", nm])
                 self.assertEqual(rc, 0, f"new {nm} should succeed")
                 rep = review_experiment(ws / "experiments" / nm)
-                self.assertEqual(rep.verdict, PASS,
-                                 f"new {nm} must produce a PASS experiment, got {rep.verdict}: "
-                                 f"{[str(p) for p in rep.problems]}")
+                # no ERROR; the only acceptable finding is the scaffold's own
+                # placeholder-question WARN (R4)
+                self.assertEqual(rep.errors, [],
+                                 f"new {nm} must review with no ERROR: "
+                                 f"{[str(p) for p in rep.errors]}")
+                self.assertEqual({p.code for p in rep.warnings}, {"question_placeholder"},
+                                 f"unexpected warnings for {nm}: "
+                                 f"{[str(p) for p in rep.warnings]}")
 
     def test_unusable_name_rejected(self):
         with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()), workspace() as _ws:

@@ -22,7 +22,7 @@ class TestParsePatch(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
         # 模拟 experiment_dir;在它下面创建 patches/V2/ 含两个 patch 文件
-        self.exp_dir = Path(self._tmp.name)
+        self.exp_dir = Path(self._tmp.name).resolve()
         patches_dir = self.exp_dir / "patches" / "V2"
         patches_dir.mkdir(parents=True)
         (patches_dir / "system.md").write_text(
@@ -125,7 +125,7 @@ class TestApplyPatch(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.exp_dir = Path(self._tmp.name) / "exp"
+        self.exp_dir = Path(self._tmp.name).resolve() / "exp"
         self.exp_dir.mkdir()
         # 准备 source patch files
         patches = self.exp_dir / "patches" / "V2"
@@ -133,7 +133,7 @@ class TestApplyPatch(unittest.TestCase):
         (patches / "system.md").write_text("custom-system", encoding="utf-8")
         (patches / "tools.yaml").write_text("custom-tools", encoding="utf-8")
         # 准备 sandbox (空 dir)
-        self.sandbox = Path(self._tmp.name) / "sandbox"
+        self.sandbox = Path(self._tmp.name).resolve() / "sandbox"
         self.sandbox.mkdir()
 
     def _patch(self, text):
@@ -216,7 +216,7 @@ class TestParsePatchSourceTraversal(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.exp_dir = Path(self._tmp.name) / "exp"
+        self.exp_dir = Path(self._tmp.name).resolve() / "exp"
         self.exp_dir.mkdir()
         patches = self.exp_dir / "patches" / "V2"
         patches.mkdir(parents=True)
@@ -278,12 +278,12 @@ class TestApplyPatchPathTraversal(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.exp_dir = Path(self._tmp.name) / "exp"
+        self.exp_dir = Path(self._tmp.name).resolve() / "exp"
         self.exp_dir.mkdir()
         patches = self.exp_dir / "patches" / "V1"
         patches.mkdir(parents=True)
         (patches / "evil.txt").write_text("evil-content", encoding="utf-8")
-        self.sandbox = Path(self._tmp.name) / "sandbox"
+        self.sandbox = Path(self._tmp.name).resolve() / "sandbox"
         self.sandbox.mkdir()
 
     def _patch_with_target(self, target: str):
@@ -345,25 +345,28 @@ class TestComputePatchHash(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.exp_dir = Path(self._tmp.name)
+        self.exp_dir = Path(self._tmp.name).resolve()
         patches = self.exp_dir / "patches" / "V2"
         patches.mkdir(parents=True)
         (patches / "system.md").write_text("custom-system", encoding="utf-8")
 
     def _make_patch(self, env=None, start_command="cmd", with_file=True):
+        # env 块外提为局部变量:f-string 表达式里的反斜杠在 3.12 之前是
+        # SyntaxError;外提顺手消掉 chr(10),生成字符串逐字节不变。
+        env_block = "\n".join(f'  {k}: "{v}"' for k, v in (env or {}).items())
         if with_file:
             text = f"""files:
   - target: prompts/system.md
     source: patches/V2/system.md
 
 env:
-{chr(10).join(f"  {k}: \"{v}\"" for k, v in (env or {}).items())}
+{env_block}
 
 start_command: {start_command}
 """
         else:
             text = f"""env:
-{chr(10).join(f"  {k}: \"{v}\"" for k, v in (env or {}).items())}
+{env_block}
 
 start_command: {start_command}
 """

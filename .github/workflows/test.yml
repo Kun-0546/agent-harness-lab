@@ -7,13 +7,14 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       # Supported range is 3.10–3.12 (3.13 is pinned out pending an unresolved hang).
-      # CI runs the newest supported version; one Linux job is enough for the MVP.
+      # CI runs the full supported range on Linux and macOS (6 jobs).
       matrix:
-        python-version: ["3.12"]
+        os: [ubuntu-latest, macos-latest]
+        python-version: ["3.10", "3.11", "3.12"]
     steps:
       - uses: actions/checkout@v4
 
@@ -28,8 +29,11 @@ jobs:
       - name: Unit tests
         run: python -m unittest discover -s tests -t .
 
+      # Verify scripts are Linux-only for now: the macOS/BSD toolchain is unvalidated.
       - name: Public MVP verification
+        if: matrix.os == 'ubuntu-latest'
         run: PYTHON=python bash scripts/verify_public_mvp.sh
 
       - name: Public completion verification
+        if: matrix.os == 'ubuntu-latest'
         run: bash scripts/verify_public_completion.sh

@@ -8,10 +8,14 @@ prompt, the tool configuration, the memory rules, the workflow. Change a harness
 it over a fixed set of cases against a real Agent Runtime, and collect reproducible
 evidence of whether the change helped.
 
-> **Status: v1, pre-release (`1.0.0.dev0`).** The sections below state what is
+> **Status: v1, pre-release (`1.0.0rc2`).** The sections below state what is
 > implemented today and what is not. This draft prioritizes accuracy over polish —
 > the product narrative will be developed further, but the README will never claim
 > more than the code does.
+>
+> **Changelog:** [GitHub Releases](https://github.com/Kun-0546/agent-harness-lab/releases)
+> is the canonical changelog. There is no `CHANGELOG.md` file — release notes live on
+> each release.
 
 ## What AHL is
 
@@ -78,7 +82,7 @@ two layers:
 | Run modes | Copilot, Auto | — |
 | Auto layers | Auto Run; **bounded/deterministic** Auto Optimize (copy-only + `mutation_script`) | LLM-based mutation; fully autonomous, remote/distributed optimization; general self-improvement engine |
 | Connectors | `local_cli`, `script` | `remote_devbox`, `api`, `bridge`, `manual` — declarable but **not executed** (rejected by review) |
-| Evaluation | `benchmark` (deterministic script); `llm_judge` (**real LLM judging** when `AHL_JUDGE_BASE_URL` / `AHL_JUDGE_MODEL` / `AHL_JUDGE_API_KEY` are set; **pending** without a key — never a fabricated verdict); `human_annotation` (ingests an annotation file, else **pending**) | streaming / multi-model judging |
+| Evaluation | `benchmark` (deterministic script); `llm_judge` (**real LLM judging** when `AHL_JUDGE_BASE_URL` / `AHL_JUDGE_MODEL` / `AHL_JUDGE_API_KEY` are set; any OpenAI-compatible endpoint — Anthropic etc. via a compatible gateway; **pending** without a key — never a fabricated verdict); `human_annotation` (ingests an annotation file, else **pending**) | streaming / multi-model judging; per-provider protocols (no `AHL_JUDGE_PROVIDER`) |
 | State policies | `isolated`, `reset` (executed) | `cumulative`, `snapshot_branch`, `replay` — declarable → WARN, not executed |
 | Reporting | `reports/report.md` + a real `reports/report.html` (stdlib renderer, no dependency); `compare` → `reports/compare.json`; `conclude` → `conclusion.md` | hosted dashboard; HTML charts |
 | Output | evidence tree (traces / raw / artifacts / scores / inspections / issues) | — |
@@ -135,8 +139,26 @@ hlab compare <experiment>   summarize the A/B result into reports/compare.json
 hlab conclude <experiment>  record your decision as conclusion.md (--winner, --reason)
 ```
 
-`hlab <cmd>` and `python -m agent_harness_lab <cmd>` are equivalent. `ahl` remains as a
-legacy redirect that points you at `hlab`.
+`hlab <cmd>` and `python -m agent_harness_lab <cmd>` are equivalent.
+
+Every command honors one exit-code contract (so a loop or a script can gate on it):
+
+| Exit code | Meaning |
+|-----------|---------|
+| `0` | success — pending evaluations (no judge key / no annotation yet), *failed* evaluations ("the answer is a failure" is a legitimate result), and warn/info-level issues do **not** fail a run |
+| `1` | configuration or preflight error |
+| `2` | not implemented in v1 |
+| `3` | runtime failure — any error-severity issue, or any evaluation track in `error`; a machine-readable `HLAB_*` error code goes to stderr |
+
+> **Breaking change in `1.0.0rc2`:** runtime failures used to exit `0`; they now exit
+> `3`. See the [release notes](https://github.com/Kun-0546/agent-harness-lab/releases)
+> for migration guidance. The full contract (per-command artifacts, `HLAB_*` error
+> codes, re-entrancy) is specified in [`docs/v1-spec/cli.md`](docs/v1-spec/cli.md).
+
+`ahl` (the retired v0.x stack) no longer runs: its workspace format is **not**
+compatible with `hlab`, and old `ahl` commands do not map 1:1 onto the v1 surface.
+Start fresh with `hlab init`; a migration guide (`migrating-from-ahl.md`) is planned
+for v1.1.
 
 ## Specification
 
