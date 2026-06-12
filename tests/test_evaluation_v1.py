@@ -2,13 +2,18 @@
 
 Evaluators run within tracks; benchmark executes a script, human_annotation/llm_judge
 are honest pending stubs; tracks aggregate; the objective's primary track is reflected.
+v1.1 (PR3): a multi-turn trace record (carries `transcript`) is judged over the whole
+conversation; the single-turn judge prompt is frozen byte-for-byte (golden-pinned).
 """
 import json
 import os
+import tempfile
 import unittest
+from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
-from agent_harness_lab import evaluation
+from agent_harness_lab import evaluation, llm
 from agent_harness_lab.experiment_spec import parse_experiment_yaml
 from tests.test_auto_v1 import _ECHO_NO_ARTIFACT, _run_cli, _setup, _workspace
 
@@ -202,6 +207,101 @@ class TestHumanAndLlm(unittest.TestCase):
                                  .read_text(encoding="utf-8").splitlines()[0])
                 self.assertEqual(rec["status"], "pending")
                 self.assertIn("AHL_JUDGE_API_KEY", rec["detail"])
+
+
+# golden copy of the frozen single-turn judge prompt — deliberately hand-written,
+# NOT built from the source constants (the pinning is the point: a multi-turn
+# landing must leave the single-turn prompt byte-for-byte unchanged).
+_GOLDEN_SINGLE_TURN_PROMPT = (
+    "You are a strict evaluator. Judge the agent's OUTPUT for the given CASE "
+    "against the RUBRIC. Be conservative: only 'pass' when the output clearly "
+    "satisfies the rubric.\n\n"
+    "[RUBRIC]\nbe right\n\n"
+    "[CASE INPUT]\nq\n\n"
+    "[AGENT OUTPUT]\nan answer\n\n"
+    "[EVIDENCE SUMMARY]\ncase_id=c1, harness_id=A, ok=True\n\n"
+    "Reply with ONLY one JSON object and nothing else:\n"
+    '{"verdict": "pass" | "fail", "score": <integer 0-100>, "reason": "<one sentence>"}'
+)
+
+
+class TestJudgePromptTranscript(unittest.TestCase):
+    """v1.1 PR3: multi-turn records are judged over the WHOLE conversation
+    ([CONVERSATION], turn by turn); without a transcript the prompt is frozen."""
+
+    _TR = [{"turn": 0, "user": "hello", "agent": "hi"},
+           {"turn": 1, "user": "q1", "agent": "a1"}]
+
+    def test_single_turn_prompt_bytes_unchanged(self):
+        got = evaluation._build_judge_prompt(
+            "be right", "q", "an answer", "case_id=c1, harness_id=A, ok=True")
+        self.assertEqual(got, _GOLDEN_SINGLE_TURN_PROMPT)
+
+    def test_none_and_empty_transcript_keep_single_turn_prompt(self):
+        base = evaluation._build_judge_prompt("r", "q", "a", "s")
+        self.assertEqual(
+            evaluation._build_judge_prompt("r", "q", "a", "s", transcript=None), base)
+        self.assertEqual(
+            evaluation._build_judge_prompt("r", "q", "a", "s", transcript=[]), base)
+
+    def test_transcript_prompt_expands_conversation(self):
+        got = evaluation._build_judge_prompt("be right", "hello", "a1", "s",
+                                             transcript=self._TR)
+        self.assertIn("[CONVERSATION]", got)
+        self.assertIn("[turn 0] user: hello", got)
+        self.assertIn("agent: hi", got)
+        self.assertIn("[turn 1] user: q1", got)
+        self.assertNotIn("[CASE INPUT]", got)
+        self.assertNotIn("[AGENT OUTPUT]", got)
+        # the frame is unchanged: rubric, evidence summary, verdict instruction
+        self.assertIn("[RUBRIC]\nbe right", got)
+        self.assertIn("[EVIDENCE SUMMARY]\ns", got)
+        self.assertIn('{"verdict": "pass" | "fail"', got)
+        # the judge is told the unit is the whole conversation
+        self.assertIn("conversation as a whole", got)
+
+
+class TestLlmJudgeTranscript(unittest.TestCase):
+    """_run_llm_judge feeds the transcript through to the prompt (and only then)."""
+
+    def _judge_capture(self, traces):
+        prompts: list[str] = []
+
+        def chat(base, model, key, prompt, **kw):
+            prompts.append(prompt)
+            return '{"verdict": "pass", "score": 80, "reason": "ok"}'
+
+        with tempfile.TemporaryDirectory() as tmp:
+            scores = Path(tmp) / "scores"
+            ev = SimpleNamespace(id="j1", method="llm_judge", rubric=None)
+            env = {"AHL_JUDGE_API_KEY": "k", "AHL_JUDGE_BASE_URL": "http://x",
+                   "AHL_JUDGE_MODEL": "m"}
+            with mock.patch.dict(os.environ, env, clear=False), \
+                    mock.patch.object(llm, "chat", chat):
+                out = evaluation._run_llm_judge(ev, "t", Path(tmp), Path(tmp), scores,
+                                                traces=traces, cases=[])
+        return out, prompts
+
+    def test_multiturn_record_judged_over_conversation(self):
+        rec = {"case_id": "c1", "harness_id": "A", "input": "hello",
+               "response": "a1", "ok": True, "turns": 2,
+               "transcript": [{"turn": 0, "user": "hello", "agent": "hi"},
+                              {"turn": 1, "user": "q1", "agent": "a1"}],
+               "simulator": "scripted"}
+        out, prompts = self._judge_capture({"runtime-a": [rec]})
+        self.assertEqual(out.status, "passed")  # scoring math unchanged
+        self.assertEqual(len(prompts), 1)
+        self.assertIn("[CONVERSATION]", prompts[0])
+        self.assertIn("[turn 1] user: q1", prompts[0])
+        self.assertNotIn("[CASE INPUT]", prompts[0])
+
+    def test_single_turn_record_keeps_original_prompt(self):
+        rec = {"case_id": "c1", "harness_id": "A", "input": "q",
+               "response": "an answer", "ok": True}
+        out, prompts = self._judge_capture({"runtime-a": [rec]})
+        self.assertEqual(out.status, "passed")
+        self.assertIn("[CASE INPUT]", prompts[0])
+        self.assertNotIn("[CONVERSATION]", prompts[0])
 
 
 class TestAggregationAndObjective(unittest.TestCase):

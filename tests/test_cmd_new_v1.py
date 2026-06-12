@@ -30,7 +30,8 @@ class TestNew(unittest.TestCase):
             self.assertEqual(rc, 0)
             exp = ws / "experiments" / "skill-ab"
             for rel in ("experiment.md", "experiment.yaml", "conclusion.md",
-                        "cases/cases.jsonl", "evaluation/evaluation.md",
+                        "cases/cases.jsonl", "cases/playbook.yaml",
+                        "evaluation/evaluation.md",
                         "agent-runtimes/runtime-a.yaml", "harnesses/A/README.md"):
                 self.assertTrue((exp / rel).exists(), f"missing {rel}")
             for sub in ("traces", "raw", "artifacts", "snapshots", "scores", "inspections"):
@@ -223,6 +224,27 @@ class TestNameHandling(unittest.TestCase):
         with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()), workspace() as _ws:
             rc = cli.main(["new", "..."])  # no [a-z0-9] -> empty id -> rejected
             self.assertEqual(rc, 1)
+
+    def test_scaffold_playbook_is_parseable_by_user_sim(self):
+        # SIM-5: the scaffolded playbook.yaml must be parseable and its default
+        # sequence must be content-equal to the built-in fallback (the retired stub).
+        from agent_harness_lab import user_sim
+        with redirect_stdout(io.StringIO()), workspace() as ws:
+            cli.main(["new", "pbtest"])
+            pb_path = ws / "experiments" / "pbtest" / "cases" / "playbook.yaml"
+            self.assertTrue(pb_path.exists(), "cases/playbook.yaml not scaffolded")
+            pb = user_sim.load_playbook(pb_path)
+            self.assertEqual(pb.default, user_sim.DEFAULT_PLAYBOOK_FOLLOWUPS,
+                             "scaffolded playbook default must equal the built-in stub sequence")
+
+    def test_scaffold_yaml_comment_mentions_scripted_and_playbook_path(self):
+        # SIM-5: the simulator comment in the scaffolded YAML must mention the
+        # scripted type and the playbook path so users can find it.
+        with redirect_stdout(io.StringIO()), workspace() as ws:
+            cli.main(["new", "pbcomment"])
+            text = (ws / "experiments" / "pbcomment" / "experiment.yaml").read_text(encoding="utf-8")
+            self.assertIn("scripted", text)
+            self.assertIn("cases/playbook.yaml", text)
 
     def test_longitudinal_sets_cumulative_state_policy(self):
         with redirect_stdout(io.StringIO()), workspace() as ws:

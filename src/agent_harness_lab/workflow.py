@@ -1,4 +1,7 @@
-"""run / score / compare 的编排层。
+"""Legacy (Stack A) — retained pending v1.1 PR9 retirement; the live v1 path is
+user_sim.py + auto.py.
+
+run / score / compare 的编排层。
 
 cli 只管解析参数和打印;「加载 → 校验 → 跑 → 存结果」这套活儿在这里。
 跑不下去的情况(校验不过、前置缺失、打分出错)抛 WorkflowError,由 cli 接住打印。

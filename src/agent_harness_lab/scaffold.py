@@ -178,8 +178,12 @@ cases:
     - cases.jsonl
 
 # How the user side of multi-turn cases is driven. single_turn (Auto v1) sends
-# each case input once. Other types: script (cases/simulator.py) and role_play
-# (actor + policy) — see docs.
+# each case input once. v1.1 multi-turn types:
+#   scripted — deterministic playbook (cases/playbook.yaml, scaffolded for you);
+#              zero LLM calls, zero keys — the designed mock.
+#   role_play — an LLM plays the user from a policy card (actor + policy).
+#   script    — an external program decides each turn (cases/simulator.py).
+# See docs/v1-spec/experiment-yaml-schema.md §14 and §14a.
 simulator:
   type: single_turn
 
@@ -387,6 +391,27 @@ CASES_JSONL_SEED = (
     '{"id": "case-001", "input": "Replace with the first case input.", '
     '"tags": ["example"]}\n'
 )
+
+# Default scripted simulator playbook — a user-designable mock artifact.
+# The two follow-up lines are content-equal to the retired Stack A stub_simulator
+# (pinned by tests/test_multiturn_parity.py). When you switch simulator.type to
+# `scripted` and point `playbook: cases/playbook.yaml` at this file, the scripted
+# engine sends these follow-ups in order, then ends the case. Edit the sequences
+# freely; add per_case: overrides keyed by case id for case-specific follow-ups.
+PLAYBOOK_YAML_TEMPLATE = """\
+# Scripted simulator playbook — cases/playbook.yaml
+# Deterministic follow-ups: zero LLM calls, zero API keys.
+# Sent in order after the opening case input; the sequence end stops the case.
+# Switch experiment.yaml simulator.type to `scripted` and set:
+#   playbook: cases/playbook.yaml
+# Edit or extend the default: sequence and add per_case: overrides as needed.
+default:
+  - "这个能再具体点吗?给个数。"
+  - "那如果情况变了,你会怎么调整?"
+# per_case:
+#   case-001:
+#     - "A specific follow-up only for case-001."
+"""
 
 EVALUATION_MD_TEMPLATE = """# Evaluation design
 
@@ -637,6 +662,7 @@ def new_experiment(root: Path, name: str, run_mode: str = "copilot",
                        hid=hid, command=command))
     # cases
     _write("cases/cases.jsonl", CASES_JSONL_SEED)
+    _write("cases/playbook.yaml", PLAYBOOK_YAML_TEMPLATE)
     _mkdir("cases/datasets")
     # evaluation (three layers: methods at workspace level; evaluators + tracks here).
     # Write the files the scaffold's evaluators reference so a fresh experiment

@@ -144,8 +144,11 @@ def run_inspection(exp_dir: Path, spec: ExperimentSpec, *,
     n_cases = len(cases)
     rt_harness = {r.id: r.harness for r in spec.agent_runtimes}
 
-    # connector_failure already recorded for these runtimes → don't also flag missing_trace
-    failed_rt = {i.get("runtime_id") for i in existing if i.get("type") == "connector_failure"}
+    # connector_failure / simulator_unconfigured already recorded for these
+    # runtimes (the latter skips dispatch entirely, v1.1 §14.5) → don't also
+    # flag missing_trace / case_coverage / missing_artifact for them
+    failed_rt = {i.get("runtime_id") for i in existing
+                 if i.get("type") in ("connector_failure", "simulator_unconfigured")}
 
     for rt_ref in spec.agent_runtimes:
         recs = _read_traces(traces_dir, rt_ref.id)

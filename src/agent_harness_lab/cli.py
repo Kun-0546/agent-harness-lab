@@ -1,6 +1,6 @@
 """Agent Harness Lab — `hlab` command-line entry (v1).
 
-Eight public commands: init / new / review / run / status / report / compare /
+Nine public commands: init / new / review / run / eval / status / report / compare /
 conclude. This layer parses args, prints results, and delegates to the copilot /
 scaffold / reviewer / experiment_spec / auto / evaluation / report / compare /
 conclude modules.
@@ -19,6 +19,13 @@ Exit codes (v1 contract): 0 success / 1 configuration or preflight error /
 evaluation track whose status is `error`). Pending evaluations (no judge key /
 no annotation yet), failed evaluations ("the answer is a failure" is a
 legitimate result) and warn/info-level issues do NOT fail the run.
+
+`eval` (added in v1.1, PR4) re-runs all evaluation tracks against existing
+evidence without touching traces/raw/issues. Evidence is the immutable first-order
+artifact; scores are recomputable derivatives. `eval` is idempotent for deterministic
+tracks (same evidence → same scores; llm_judge is the exception, documented in the
+spec). The human_annotation backflow scenario (run → pending → write annotation →
+eval → scored) is enabled by `eval`.
 
 Runs on Python 3.10-3.12. Modules in the package that are not reached by this CLI
 surface are internal and not part of the public API.
@@ -164,6 +171,22 @@ def _print_review(report) -> None:
         print(f"  WARN   {p.code}: {p.message}")
 
 
+def _print_source_checks(report) -> None:
+    """Print compact per-runtime source health check lines (PR8)."""
+    checks = getattr(report, "source_checks", None)
+    if not checks:
+        return
+    print("source health checks:")
+    for sc in checks:
+        rt_id = sc.get("runtime_id", "?")
+        stype = sc.get("source_type", "?")
+        target = sc.get("target", "?")
+        result = sc.get("check_result", "?")
+        fp = sc.get("fingerprint", "")
+        fp_display = f"  fingerprint: {fp[:40]}..." if len(fp) > 40 else (f"  fingerprint: {fp}" if fp else "")
+        print(f"  {rt_id}  type={stype}  target={target}  [{result}]{fp_display}")
+
+
 def cmd_review(args: argparse.Namespace) -> int:
     exp_dir = _resolve_experiment(args.experiment)
     if exp_dir is None:
@@ -173,6 +196,7 @@ def cmd_review(args: argparse.Namespace) -> int:
     print(f"review: {exp_dir}")
     print(f"verdict: {report.verdict}")
     _print_review(report)
+    _print_source_checks(report)
     if report.verdict == PASS:
         print("  OK — no problems found.")
         print(f"Next: hlab run {args.experiment}")
@@ -307,17 +331,94 @@ def cmd_run(args: argparse.Namespace) -> int:
                 inspector._read_issues(final_ev / "issues.jsonl"),
                 _track_statuses(final_ev),
                 evidence_ref=f"optimization/iterations/{final_ev.parent.name}/evidence/")
-        res = auto.run_auto(exp_dir, spec)
+
+        # PR5 5b: multi-trial loop. config trials vs --trials override.
+        _fresh = getattr(args, "fresh", False)
+        _trials_override = getattr(args, "trials", None)
+        _config_trials = spec.trials  # parsed from execution.trials (default 1)
+        if _trials_override is not None:
+            if not isinstance(_trials_override, int) or _trials_override < 1:
+                print(f"run: --trials must be a positive integer, got {_trials_override!r}",
+                      file=sys.stderr)
+                return 1
+            _effective_trials = _trials_override
+        else:
+            _effective_trials = _config_trials
+
+        all_issues: list[dict] = []
+        ev_result_last = evaluation.EvaluationResult()
+        last_res = None
+
+        for _t_idx in range(_effective_trials):
+            # fresh=True only on the first iteration (or if --fresh was passed)
+            _run_fresh = _fresh and _t_idx == 0
+            res = auto.run_auto(exp_dir, spec, fresh=_run_fresh)
+            last_res = res
+            all_issues.extend(res.issues)
+            # defect 1b: evaluate inline after EACH trial with that trial's number so
+            # per-trial score records exist for multi-trial aggregation. The last trial's
+            # evaluation is authoritative for the exit-code contract (defect 1f).
+            # trial number mirrors _next_trial semantics: trial 0 = no stamp (None),
+            # trial >= 1 = stamp. We discover the actual trial from the trace records.
+            if spec.evaluators and spec.tracks:
+                _this_trial: int | None = None
+                for _r in res.issues:
+                    pass  # issues don't carry trial; discover from traces
+                # read from the trace file what trial this run wrote
+                import json as _json_mod
+                _tdir = (last_res.evidence_dir or exp_dir / "evidence") / "traces"
+                _this_trial_num = 0
+                if _tdir.is_dir():
+                    for _tp in _tdir.glob("*.jsonl"):
+                        try:
+                            _lines = [ln.strip() for ln in
+                                      _tp.read_text(encoding="utf-8").splitlines() if ln.strip()]
+                            if _lines:
+                                _last_rec = _json_mod.loads(_lines[-1])
+                                _t = _last_rec.get("trial")
+                                if isinstance(_t, int):
+                                    _this_trial_num = _t
+                        except Exception:  # noqa: BLE001
+                            pass
+                        break
+                # score_trial: None for trial 0 (no stamp), else the number
+                _score_trial: int | None = _this_trial_num if _this_trial_num >= 1 else None
+                try:
+                    ev_result_last = evaluation.run_evaluation(
+                        exp_dir, spec, trial=_score_trial if _score_trial is not None else None)
+                except evaluation.MissingEvidenceError:
+                    ev_result_last = evaluation.EvaluationResult()
+            elif not spec.evaluators:
+                ev_result_last = evaluation.EvaluationResult()
+
+        # if override was used, record it in a run-metadata file
+        if _trials_override is not None and _trials_override != _config_trials:
+            _meta_dir = (last_res.evidence_dir if last_res else exp_dir / "evidence")
+            _meta_dir.mkdir(parents=True, exist_ok=True)
+            _meta_path = _meta_dir / "run-metadata.json"
+            import json as _json_mod
+            _meta_path.write_text(
+                _json_mod.dumps({
+                    "config_trials": _config_trials,
+                    "effective_trials": _effective_trials,
+                    "trials_override": True,
+                }, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8")
+
+        res = last_res  # for reporting below
+
         print(f"Auto Mode (run.mode=auto, execution.mode={spec.execution_mode}):")
+        _trial_note = (f", {_effective_trials} trial(s)"
+                       if _effective_trials > 1 else "")
         print(f"  - dispatched {res.dispatched} case run(s) "
-              f"({res.cases} case(s) × {res.runtimes} runtime(s))")
+              f"({res.cases} case(s) × {res.runtimes} runtime(s)){_trial_note}")
         print(f"  - evidence written under: {res.evidence_dir}")
-        print(f"  - traces: {res.traces_written}  |  issues: {len(res.issues)}", end="")
-        counts = res.issue_counts()
-        print(f"  {counts}" if counts else "")
-        # Evaluation: run each track's evaluators over the evidence just collected.
-        ev_result = (evaluation.run_evaluation(exp_dir, spec)
-                     if spec.evaluators else evaluation.EvaluationResult())
+        print(f"  - traces: {res.traces_written}  |  issues: {len(all_issues)}", end="")
+        counts_all: dict[str, int] = {}
+        for _i in all_issues:
+            counts_all[_i.get("type", "?")] = counts_all.get(_i.get("type", "?"), 0) + 1
+        print(f"  {counts_all}" if counts_all else "")
+        ev_result = ev_result_last
         if ev_result.ran:
             from agent_harness_lab import report_builder
             comp = report_builder.comparative_summary(exp_dir, spec)
@@ -346,10 +447,20 @@ def cmd_run(args: argparse.Namespace) -> int:
         insp = inspector.run_inspection(exp_dir, spec)
         print(f"  - inspection: +{len(insp.added)} issue(s) → {insp.issue_total} total "
               f"{insp.severity_counts()}")
-        print(f"Next: hlab report {args.experiment}")
-        # exit-code contract: judge the merged issue set + the evaluated tracks
+        if any(t.status == "pending" for t in ev_result.tracks):
+            print(f"Next: hlab eval {args.experiment}  "
+                  f"(re-score after writing annotation files or setting AHL_JUDGE_API_KEY)")
+        else:
+            print(f"Next: hlab report {args.experiment}")
+        # exit-code contract (defect 3c): judge THIS invocation's in-memory issues
+        # (not the full accumulated file) plus inspector-added issues from THIS run.
+        # all_issues = issues from every trial in this invocation.
+        # insp.added = inspector issues added in THIS run (deduped against prior).
+        # Using in-memory avoids a historical trial-0 connector_failure from a prior
+        # run persisting into this run's exit code.
+        _exit_issues = list(all_issues) + list(insp.added)
         return _runtime_failure_exit(
-            insp.issues, [(t.track_id, t.status) for t in ev_result.tracks])
+            _exit_issues, [(t.track_id, t.status) for t in ev_result.tracks])
 
     # Any other run.mode is not executable in v1.
     print(f"run: {exp_dir}  (run.mode={spec.run_mode}, execution.mode={spec.execution_mode})",
@@ -357,6 +468,94 @@ def cmd_run(args: argparse.Namespace) -> int:
     print(f"NOT IMPLEMENTED: run.mode={spec.run_mode!r} is not executable "
           f"(use copilot or auto).", file=sys.stderr)
     return 2
+
+
+def cmd_eval(args: argparse.Namespace) -> int:
+    """Re-run all evaluation tracks against existing evidence (read-only input).
+
+    Evidence (traces / raw / issues) is never touched — eval rewrites only
+    scores/ and scores/tracks/. This enables the human_annotation backflow:
+    run → pending → human writes annotation file → hlab eval adopts it and scores.
+
+    Preflight: missing or empty evidence → exit 1 (HLAB_MISSING_EVIDENCE on stderr).
+    Exit 3: any evaluation track lands in status:error after recompute
+            (HLAB_EVAL_ERROR on stderr pointing at scores/tracks/).
+    Exit 0: success, including pending tracks (no key configured is not a failure)
+            and failed tracks (a failed experiment answer is a legitimate result).
+    """
+    exp_dir = _resolve_experiment(args.experiment)
+    if exp_dir is None:
+        print(f"Experiment not found: {args.experiment}", file=sys.stderr)
+        return 1
+
+    yaml_path = exp_dir / "experiment.yaml"
+    if not yaml_path.exists():
+        print(f"No experiment.yaml in {exp_dir}", file=sys.stderr)
+        return 1
+    try:
+        from agent_harness_lab.experiment_spec import (
+            ExperimentSpecError, parse_experiment_yaml)
+        spec = parse_experiment_yaml(yaml_path)
+    except ExperimentSpecError as e:
+        print(str(e), file=sys.stderr)
+        return 1
+
+    # review-stage precheck: evidence must exist and contain trace records
+    evidence_dir = exp_dir / "evidence"
+    traces_dir = evidence_dir / "traces"
+    if not evidence_dir.is_dir():
+        print(f"HLAB_MISSING_EVIDENCE: no evidence/ directory found in {exp_dir} — "
+              f"run `hlab run {args.experiment}` first to collect evidence",
+              file=sys.stderr)
+        return 1
+    has_traces = (traces_dir.is_dir() and
+                  any(p.suffix == ".jsonl" and p.stat().st_size > 0
+                      for p in traces_dir.iterdir() if p.is_file()))
+    if not has_traces:
+        print(f"HLAB_MISSING_EVIDENCE: evidence/traces/ has no trace records in {exp_dir} — "
+              f"run `hlab run {args.experiment}` first to collect evidence",
+              file=sys.stderr)
+        return 1
+
+    if not spec.evaluators:
+        print(f"eval: {exp_dir}")
+        print("  no evaluators configured — nothing to evaluate")
+        print(f"Next: hlab report {args.experiment}")
+        return 0
+
+    # PR5 5a: --trial N selects a historical trial; default = latest
+    _trial_n = getattr(args, "trial", None)
+
+    from agent_harness_lab import evaluation
+    if not spec.tracks:
+        ev_result = evaluation.EvaluationResult()
+    else:
+        try:
+            ev_result = evaluation.run_evaluation(exp_dir, spec, trial=_trial_n)
+        except evaluation.MissingEvidenceError as e:
+            # defect 2: trial explicitly requested but no evidence for it — exit 1,
+            # write nothing (the exception constructor carries the HLAB_MISSING_EVIDENCE msg)
+            print(str(e), file=sys.stderr)
+            return 1
+
+    print(f"eval: {exp_dir}")
+    if ev_result.ran:
+        _trial_note = f" (trial {_trial_n})" if _trial_n is not None else " (latest trial)"
+        print(f"  - re-evaluated {len(ev_result.tracks)} track(s) {ev_result.status_counts()}"
+              f"{_trial_note}")
+        if ev_result.objective_track:
+            print(f"    objective primary track '{ev_result.objective_track}': "
+                  f"{ev_result.objective_status}")
+        print("  - evidence (traces / raw / issues) was not modified")
+    else:
+        print("  - no tracks configured — nothing evaluated")
+    print(f"Next: hlab report {args.experiment}")
+
+    # exit-code contract: only track errors cause exit 3; no issues from eval itself.
+    # defect 7: pass "evidence/" (not "evidence/scores/tracks/") so the message reads
+    # "see evidence/scores/tracks/" — _runtime_failure_exit appends "scores/tracks/".
+    error_tracks = [(t.track_id, t.status) for t in ev_result.tracks]
+    return _runtime_failure_exit([], error_tracks, evidence_ref="evidence/")
 
 
 def cmd_status(args: argparse.Namespace) -> int:
@@ -568,7 +767,7 @@ creates the workspace; every other command acts on one experiment directory
 _CLI_EPILOG = """\
 the experiment loop (commands by stage):
   prepare           init, new
-  gate & execute    review, run, status
+  gate & execute    review, run, eval, status
   conclude          report, compare, conclude
 
 exit codes:
@@ -624,7 +823,23 @@ def build_parser() -> argparse.ArgumentParser:
         "run", help="<experiment>: execute it (Auto Mode) or render its "
                     "agent-task.md (Copilot Mode)")
     p_run.add_argument("experiment", metavar="<experiment>", help=_EXPERIMENT_ARG_HELP)
+    p_run.add_argument("--trials", metavar="N", type=int, default=None,
+                       help="override execution.trials for this invocation (positive integer; "
+                            "recorded in evidence when it differs from the config value)")
+    p_run.add_argument("--fresh", action="store_true", default=False,
+                       help="wipe evidence/ before running — the only sanctioned destruction; "
+                            "starts a clean trial-0 run (without --fresh a re-run appends as "
+                            "a new trial)")
     p_run.set_defaults(func=cmd_run)
+
+    p_eval = sub.add_parser(
+        "eval",
+        help="<experiment>: re-run all evaluation tracks against existing evidence "
+             "(evidence is read-only; scores/ is rewritten)")
+    p_eval.add_argument("experiment", metavar="<experiment>", help=_EXPERIMENT_ARG_HELP)
+    p_eval.add_argument("--trial", metavar="N", type=int, default=None,
+                        help="re-evaluate a specific historical trial N (default: latest trial)")
+    p_eval.set_defaults(func=cmd_eval)
 
     p_status = sub.add_parser(
         "status", help="<experiment>: show its spec, evidence, and evaluation state")
@@ -681,6 +896,7 @@ def ahl_redirect(argv: list[str] | None = None) -> int:
     print("an `ahl` workspace cannot be opened by `hlab`, and old `ahl` commands "
           "do not map 1:1 onto the v1 surface.", file=sys.stderr)
     print("Start fresh with `hlab init` + `hlab --help`; see the README's "
-          "'Command surface' section for the v1 loop. A migration guide "
-          "(migrating-from-ahl.md) is planned for v1.1.", file=sys.stderr)
+          "'Command surface' section for the v1 loop, and the migration guide "
+          "(docs/migrating-from-ahl.md) for how old `ahl` files map onto v1.",
+          file=sys.stderr)
     return 1

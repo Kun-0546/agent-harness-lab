@@ -1,4 +1,7 @@
-"""跑 —— 让被测 agent 过一遍测试集,产出多轮对话。
+"""Legacy (Stack A) — retained pending v1.1 PR9 retirement; the live v1 path is
+user_sim.py + auto.py.
+
+跑 —— 让被测 agent 过一遍测试集,产出多轮对话。
 
 Lifecycle 由 workflow.run 编排(C5):
 - per variant materialize / teardown 在 workflow 层做(sandbox 是 per variant,

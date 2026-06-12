@@ -238,14 +238,34 @@ class TestAutoLocalCli(unittest.TestCase):
             _run_cli(["run", "experiments/demo"])
             self.assertIn("connector_failure", _issue_types(ws / "experiments" / "demo"))
 
-    def test_rerun_overwrites_traces_not_appends(self):
+    def test_rerun_appends_as_trial_1(self):
+        # PR5a: re-run appends as new trial instead of truncating.
         with _workspace() as ws:
             _setup(ws, connector="local_cli")  # 1 case
             _run_cli(["run", "experiments/demo"])
-            _run_cli(["run", "experiments/demo"])  # re-run
+            _run_cli(["run", "experiments/demo"])  # re-run → trial 1
             tf = ws / "experiments" / "demo" / "evidence" / "traces" / "runtime-a.jsonl"
             lines = [ln for ln in tf.read_text(encoding="utf-8").splitlines() if ln.strip()]
-            self.assertEqual(len(lines), 1)  # 1 case → 1 trace, not doubled
+            # 1 case × 2 trials = 2 records; trial-0 has no `trial` field,
+            # trial-1 carries `trial: 1`
+            self.assertEqual(len(lines), 2)
+            import json as _j
+            recs = [_j.loads(ln) for ln in lines]
+            self.assertNotIn("trial", recs[0])  # trial 0 stays byte-identical
+            self.assertEqual(recs[1].get("trial"), 1)
+
+    def test_fresh_flag_wipes_and_starts_trial_0(self):
+        with _workspace() as ws:
+            _setup(ws, connector="local_cli")  # 1 case
+            _run_cli(["run", "experiments/demo"])
+            _run_cli(["run", "--fresh", "experiments/demo"])  # wipe + clean trial 0
+            tf = ws / "experiments" / "demo" / "evidence" / "traces" / "runtime-a.jsonl"
+            lines = [ln for ln in tf.read_text(encoding="utf-8").splitlines() if ln.strip()]
+            # --fresh wipes then runs trial 0 → exactly 1 record, no trial field
+            self.assertEqual(len(lines), 1)
+            import json as _j
+            rec = _j.loads(lines[0])
+            self.assertNotIn("trial", rec)
 
     def test_connector_timeout_failure(self):
         with _workspace() as ws:
