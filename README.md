@@ -8,8 +8,8 @@ prompt, the tool configuration, the memory rules, the workflow. Change a harness
 it over a fixed set of cases against a real Agent Runtime, and collect reproducible
 evidence of whether the change helped.
 
-> **Status: v1, pre-release (`1.0.0rc2`).** The sections below state what is
-> implemented today and what is not. This draft prioritizes accuracy over polish —
+> **Status: v1, stable (`1.0.0`).** The sections below state what is
+> implemented today and what is not. This document prioritizes accuracy over polish —
 > the product narrative will be developed further, but the README will never claim
 > more than the code does.
 >
@@ -150,7 +150,7 @@ Every command honors one exit-code contract (so a loop or a script can gate on i
 | `2` | not implemented in v1 |
 | `3` | runtime failure — any error-severity issue, or any evaluation track in `error`; a machine-readable `HLAB_*` error code goes to stderr |
 
-> **Breaking change in `1.0.0rc2`:** runtime failures used to exit `0`; they now exit
+> **Breaking change in `1.0.0` (introduced in rc2):** runtime failures used to exit `0`; they now exit
 > `3`. See the [release notes](https://github.com/Kun-0546/agent-harness-lab/releases)
 > for migration guidance. The full contract (per-command artifacts, `HLAB_*` error
 > codes, re-entrancy) is specified in [`docs/v1-spec/cli.md`](docs/v1-spec/cli.md).

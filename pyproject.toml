@@ -1,6 +1,6 @@
 [project]
 name = "agent-harness-lab"
-version = "1.0.0rc2"
+version = "1.0.0"
 description = "Run goal-driven harness experiments on real Agent Runtimes."
 # Python 3.13 is NOT yet supported: a reviewer reported an intermittent test-suite
 # hang on 3.13.5 that could not be reproduced or fixed with confidence. Pinned out
@@ -25,7 +25,7 @@ keywords = [
   "agentic",
 ]
 classifiers = [
-  "Development Status :: 4 - Beta",
+  "Development Status :: 5 - Production/Stable",
   "Intended Audience :: Developers",
   "License :: OSI Approved :: MIT License",
   "Operating System :: OS Independent",
