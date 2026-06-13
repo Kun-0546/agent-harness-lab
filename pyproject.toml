@@ -1,6 +1,6 @@
 [project]
 name = "agent-harness-lab"
-version = "1.0.0"
+version = "1.1.0"
 description = "Run goal-driven harness experiments on real Agent Runtimes."
 # Python 3.13 is NOT yet supported: a reviewer reported an intermittent test-suite
 # hang on 3.13.5 that could not be reproduced or fixed with confidence. Pinned out
