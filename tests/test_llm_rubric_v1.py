@@ -778,20 +778,10 @@ class TestTrialAwareness(unittest.TestCase):
                 self.assertIn("trial0-answer", calls[0])
 
 
-# --- Section 14: grader-parity fixture ----------------------------------------
+# --- Section 14: llm_rubric weighted-math checks ------------------------------
 
-class TestGraderParity(unittest.TestCase):
-    """Verify llm_rubric's weighted aggregation math matches grader.py's score_run.
-
-    This is the seed of the PR9 deletion-gate comparison. Both use the same
-    normalise-then-weighted-sum formula. The test runs both paths on the same
-    fixture and asserts they agree.
-
-    grader.py score_run normalisation:
-      raw_weights = {dim.name: dim.weight for dim in rubric.dimensions}
-      total_w = sum(raw_weights.values())
-      weight = {k: v / total_w for k, v in raw_weights.items()}   # if total_w > 0
-      total = round(sum(dims.get(name, 0.0) * w for name, w in weight.items()), 2)
+class TestRubricWeightedMath(unittest.TestCase):
+    """Verify llm_rubric's weighted aggregation math (normalise-then-weighted-sum).
 
     llm_rubric normalisation (evaluation.py _run_llm_rubric):
       raw_weights = {d["name"]: d["weight"] for d in dimensions}
@@ -799,7 +789,8 @@ class TestGraderParity(unittest.TestCase):
       weights = {k: v / total_w for k, v in raw_weights.items()}
       weighted_total = round(sum(dim_scores.get(n, 0.0) * weights.get(n, 0.0) for n in dim_names), 2)
 
-    Both round to 2 decimal places after summing. The test verifies numerically.
+    Rounds to 2 decimal places after summing. Verified numerically below.
+    (The old grader.py cross-check was removed when Stack A was retired in PR9.)
     """
 
     _RUBRIC_FIXTURE = """\
@@ -825,53 +816,12 @@ class TestGraderParity(unittest.TestCase):
         dim_names = [d["name"] for d in dims]
         return round(sum(dim_scores.get(n, 0.0) * weights.get(n, 0.0) for n in dim_names), 2)
 
-    def _grader_py_weighted_total(self, rubric_text, dim_scores):
-        """Replicate grader.py score_run's normalise+sum math directly.
-
-        grader.py is importable; we use its Rubric/Dimension/score_run to
-        compute the same result. If grader.py's entry points make this awkward
-        (it expects a file path), we replicate its documented math instead and
-        note that in the report.
-        """
-        from agent_harness_lab.grader import score_run
-        from agent_harness_lab.rubric import parse_rubric
-        import tempfile, os as _os
-        # Write rubric to a temp file; grader.py's parse_rubric needs a real path.
-        # The rubric.py format uses H2 sections with "权重: N" lines, but grader.py
-        # accepts a Rubric object directly via score_run. We build the Rubric manually
-        # from the parsed table to avoid format mismatches.
-        from agent_harness_lab.rubric import Rubric, Dimension
-        from pathlib import Path as _Path
-        dims_parsed = _parse_rubric_table(rubric_text)
-        rubric = Rubric(path=_Path("fixture.md"))
-        for d in dims_parsed:
-            rubric.dimensions.append(Dimension(
-                name=d["name"], weight=d["weight"], description=d["description"]))
-        # Build run records in grader.py's format (transcript=[{turn, user, agent}])
-        run_record = {
-            "version_id": "A",
-            "case_id": "c1",
-            "transcript": [{"turn": 0, "user": "q", "agent": "ans"}],
-        }
-        # Use a custom grader that returns our fixed dim_scores
-        def fixed_grader(rub, vid, cid, transcript):
-            return dict(dim_scores)
-        scores = score_run(rubric, [run_record], grader=fixed_grader)
-        return scores[0].total if scores else None
-
     def test_hand_computed_total_matches_llm_rubric_math(self):
         total = self._llm_rubric_weighted_total(self._RUBRIC_FIXTURE, self._DIM_SCORES)
         self.assertAlmostEqual(total, self._EXPECTED_TOTAL, places=2)
 
-    def test_llm_rubric_math_matches_grader_py_math(self):
-        """llm_rubric's weighted-sum formula equals grader.py's score_run formula."""
-        v1_total = self._llm_rubric_weighted_total(self._RUBRIC_FIXTURE, self._DIM_SCORES)
-        grader_total = self._grader_py_weighted_total(self._RUBRIC_FIXTURE, self._DIM_SCORES)
-        self.assertAlmostEqual(v1_total, grader_total, places=2,
-                               msg=f"llm_rubric total {v1_total} != grader.py total {grader_total}")
-
-    def test_normalisation_parity_when_weights_not_sum_to_one(self):
-        """Both stacks normalise the same way when weights don't sum to 1."""
+    def test_normalisation_when_weights_not_sum_to_one(self):
+        """llm_rubric normalises weights that don't sum to 1."""
         rubric_uneven = """\
 | Dimension | Weight | Description |
 |-----------|--------|-------------|
@@ -881,10 +831,7 @@ class TestGraderParity(unittest.TestCase):
         dim_scores = {"dim_a": 100.0, "dim_b": 50.0}
         # Expected: weights -> 2/5=0.4, 3/5=0.6 -> 100*0.4 + 50*0.6 = 40+30 = 70.0
         v1_total = self._llm_rubric_weighted_total(rubric_uneven, dim_scores)
-        grader_total = self._grader_py_weighted_total(rubric_uneven, dim_scores)
         self.assertAlmostEqual(v1_total, 70.0, places=2)
-        self.assertAlmostEqual(grader_total, 70.0, places=2)
-        self.assertAlmostEqual(v1_total, grader_total, places=2)
 
     def test_full_pipeline_weighted_total_via_mock(self):
         """Full _run_llm_rubric pipeline produces the hand-computed total."""
