@@ -1,13 +1,15 @@
-"""The v1 public CLI surface is exactly 8 `hlab` commands; `ahl` redirects."""
+"""The v1 public CLI surface is exactly 9 `hlab` commands (8 + eval from v1.1 PR4);
+`ahl` redirects."""
 import argparse
 import io
 import sys
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
+from pathlib import Path
 
 from agent_harness_lab import cli
 
-V1_COMMANDS = {"init", "new", "review", "run", "status", "report", "compare", "conclude"}
+V1_COMMANDS = {"init", "new", "review", "run", "eval", "status", "report", "compare", "conclude"}
 OLD_COMMANDS = {
     "walkthrough", "connect", "show", "cases", "rubric", "simulator",
     "harnesses", "versions", "draft", "score", "probe",
@@ -25,7 +27,7 @@ class TestSurface(unittest.TestCase):
     def test_prog_is_hlab(self):
         self.assertEqual(cli.build_parser().prog, "hlab")
 
-    def test_exactly_eight_commands(self):
+    def test_exactly_nine_commands(self):
         choices = _subparser_choices(cli.build_parser())
         self.assertEqual(choices, V1_COMMANDS,
                          f"public surface must be exactly {sorted(V1_COMMANDS)}, got {sorted(choices)}")
@@ -73,7 +75,7 @@ class TestHelpPresentation(unittest.TestCase):
     def test_each_experiment_command_help_line_names_its_object(self):
         # verb + explicit object argument + one-line user understanding
         text = self._help()
-        for cmd in ("review", "run", "status", "report", "compare", "conclude"):
+        for cmd in ("review", "run", "eval", "status", "report", "compare", "conclude"):
             self.assertRegex(text, rf"{cmd}\s+<experiment>:",
                              f"`{cmd}` help line must show its <experiment> object")
         self.assertRegex(text, r"new\s+<name>:")
@@ -81,7 +83,7 @@ class TestHelpPresentation(unittest.TestCase):
     def test_subcommand_usage_shows_experiment_metavar(self):
         for a in cli.build_parser()._actions:
             if isinstance(a, argparse._SubParsersAction):
-                for name in ("review", "run", "status", "report", "compare", "conclude"):
+                for name in ("review", "run", "eval", "status", "report", "compare", "conclude"):
                     usage = a.choices[name].format_usage()
                     self.assertIn("<experiment>", usage,
                                   f"`hlab {name}` usage must show <experiment>")
@@ -105,7 +107,7 @@ class TestAhlRedirect(unittest.TestCase):
     def test_ahl_redirect_is_honest_about_incompatibility(self):
         # R9: no fake "Please use: hlab <args>" shim — the two stacks' workspace
         # formats are NOT compatible, and the message must say so + point at the
-        # README until migrating-from-ahl.md (v1.1) lands.
+        # README and at the shipped migration guide (v1.1, PR1).
         saved = sys.argv
         sys.argv = ["ahl", "score", "foo"]
         try:
@@ -120,7 +122,15 @@ class TestAhlRedirect(unittest.TestCase):
         self.assertNotIn("hlab score", text)  # never echo an old command as if it works
         self.assertIn("NOT compatible", text)
         self.assertIn("README", text)
-        self.assertIn("migrating-from-ahl.md", text)
+        self.assertIn("docs/migrating-from-ahl.md", text)
+        self.assertNotIn("planned", text)  # the guide shipped — no stale promise
+
+    def test_ahl_redirect_migration_guide_exists(self):
+        # the path the redirect prints must exist in the repo — no dead pointer
+        root = Path(__file__).resolve().parents[1]
+        self.assertTrue((root / "docs" / "migrating-from-ahl.md").is_file(),
+                        "ahl_redirect points at docs/migrating-from-ahl.md, "
+                        "which must ship with the repo")
 
 
 if __name__ == "__main__":

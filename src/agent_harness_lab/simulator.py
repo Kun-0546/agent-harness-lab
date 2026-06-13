@@ -1,4 +1,7 @@
-"""模拟器 —— 模拟模式下扮用户的那个 agent。
+"""Legacy (Stack A) — retained pending v1.1 PR9 retirement; the live v1 path is
+user_sim.py + auto.py.
+
+模拟器 —— 模拟模式下扮用户的那个 agent。
 
 模拟器 = experiment 里的 simulator.md(人设 + 背景知识 + 追问策略)。
 多轮 run 里,模拟器看着对话生成下一句用户话。

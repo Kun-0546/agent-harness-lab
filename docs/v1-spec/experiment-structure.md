@@ -115,6 +115,8 @@ Optional:
 ```text
 cases/datasets/
 cases/simulator.md
+cases/playbook.yaml   scripted simulator playbook — scaffolded by `hlab new`;
+                      a user-designable mock (default: sequence + per_case overrides)
 ```
 
 ### evaluation/

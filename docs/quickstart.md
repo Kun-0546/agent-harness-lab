@@ -22,6 +22,8 @@ hlab init                  initialize a workspace (goal.md, evaluation-methods/,
 hlab new <name>            scaffold an experiment (--mode copilot|auto, --execution ab|..., --question)
 hlab review <experiment>   validate experiment.yaml before running (PASS / WARN / ERROR)
 hlab run <experiment>      Copilot: render agent-task.md · Auto: drive runtimes + collect evidence
+hlab eval <experiment>     re-run all evaluation tracks against existing evidence (scores recomputed;
+                           evidence is read-only — traces/raw/issues never modified)
 hlab status <experiment>   show status + evidence/evaluation state
 hlab report <experiment>   build reports/report.md (+ report.html) from the evidence
 hlab compare <experiment>  summarize the A/B result into reports/compare.json
@@ -73,6 +75,24 @@ harness passes — normal for an A/B run; the per-harness comparison is the sign
 it; this demo keeps `md` only), it also writes `reports/report.html` — a real,
 self-contained render of the same report using only the stdlib, no dependency.
 
+## Re-score after writing annotations (human_annotation backflow)
+
+When an experiment uses `human_annotation` evaluation, `run` leaves those tracks
+`pending` until annotation files are written. Use `eval` to adopt them without
+re-running the experiment (which would destroy the traces the annotations refer to):
+
+```bash
+# 1. After run, write the annotation file alongside the score records:
+echo '{"passed": true, "score": 0.9, "detail": "looks good"}' \
+  > experiments/demo/evidence/scores/review/h1.annotation.json
+
+# 2. Re-evaluate — traces are read-only; only scores/ is rewritten:
+PYTHONPATH=../../src python -m agent_harness_lab eval experiments/demo
+```
+
+`eval` also re-runs `benchmark`, `llm_judge`, and `llm_rubric` tracks (the
+latter two if `AHL_JUDGE_API_KEY` is now set after a previous offline run).
+
 ## Close the loop: compare and conclude
 
 `report` summarizes; `compare` reduces the A/B result to machine-readable JSON;
@@ -117,6 +137,60 @@ the protected surface (cases / evaluation / objective / goal) rolls the candidat
 
 `review` emits an `optimization_bounded_only` WARN: the loop runs, but it is
 deterministic (copy-only / script-based), **not** LLM-driven or autonomous.
+
+## Run a multi-trial experiment (reduce single-run variance)
+
+A single-trial A/B result can be misleading — random variation in the agent's
+output or the LLM judge's scoring can flip the winner. Multi-trial support
+(v1.1) repeats the run `N` times and aggregates the scores.
+
+Add `trials` (and optionally `aggregation`) to `execution:` in your
+`experiment.yaml`:
+
+```yaml
+execution:
+  mode: ab
+  state_policy: isolated
+  trials: 3
+  aggregation: [mean, stddev, win_rate]
+```
+
+Then run as usual — the three trials are executed in one command:
+
+```bash
+hlab run experiments/my-experiment
+hlab compare experiments/my-experiment   # emits aggregation_stats across trials
+```
+
+Or override the trial count for a one-off run without changing the YAML:
+
+```bash
+hlab run experiments/my-experiment --trials 5
+```
+
+The override is recorded in `evidence/run-metadata.json` so reports can show
+that the run used a different count than configured.
+
+To start fresh (wipe all prior evidence and start at trial 0):
+
+```bash
+hlab run experiments/my-experiment --fresh
+```
+
+`--fresh` is the only sanctioned way to delete evidence. Without it, re-runs
+always append as a new trial — old evidence is never silently overwritten.
+
+After multiple trials, `hlab eval --trial N` lets you re-evaluate a specific
+historical trial:
+
+```bash
+hlab eval experiments/my-experiment --trial 0   # re-score trial 0
+hlab eval experiments/my-experiment             # re-score latest trial (default)
+```
+
+**Cost note:** multi-trial LLM-simulated runs make on the order of
+`runtimes × cases × max_turns × trials` model calls. Pilot with a small
+experiment first to estimate cost.
 
 ## Where the contracts live
 

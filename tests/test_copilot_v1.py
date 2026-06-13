@@ -217,6 +217,55 @@ class TestCopilotRun(unittest.TestCase):
             self.assertIn("## Simulator", body)
             self.assertIn("single_turn", body)  # scaffold default simulator
 
+    def test_scripted_simulator_brief_names_playbook_and_sequence_contract(self):
+        # Pin the scripted branch: brief must name the playbook path and describe
+        # the deterministic sequence contract (not the old single_turn else-branch).
+        with workspace() as ws:
+            _new("demo")
+            exp = ws / "experiments" / "demo"
+            y = exp / "experiment.yaml"
+            (exp / "cases" / "playbook.yaml").write_text(
+                "default:\n  - \"q1\"\n  - \"q2\"\n", encoding="utf-8")
+            y.write_text(y.read_text(encoding="utf-8").replace(
+                "simulator:\n  type: single_turn",
+                "simulator:\n  type: scripted\n  playbook: cases/playbook.yaml\n  max_turns: 4"),
+                encoding="utf-8")
+            rc, _, _ = _run(["run", "experiments/demo"])
+            self.assertEqual(rc, 0)
+            body = (exp / "agent-task.md").read_text(encoding="utf-8")
+            self.assertIn("scripted", body)
+            self.assertIn("cases/playbook.yaml", body)
+            self.assertIn("playbook", body.lower())
+            # must NOT fall into the single_turn else-branch
+            self.assertNotIn("send each case input once; no multi-turn", body)
+
+    def test_role_play_brief_mentions_auto_mode_execution(self):
+        # Pin the updated role_play wording: brief must mention Copilot Mode actor
+        # contract AND note that Auto Mode executes it automatically (v1.1 change).
+        with workspace() as ws:
+            _new("demo")
+            exp = ws / "experiments" / "demo"
+            y = exp / "experiment.yaml"
+            (exp / "cases" / "policy.md").write_text(
+                "## Persona\n\na picky CFO\n\n## Strategy\n\nask for numbers\n\n"
+                "## Stop\n\ngot a number\n", encoding="utf-8")
+            y.write_text(y.read_text(encoding="utf-8").replace(
+                "simulator:\n  type: single_turn",
+                "simulator:\n  type: role_play\n  actor: cfo\n"
+                "  policy: cases/policy.md\n  max_turns: 4"),
+                encoding="utf-8")
+            rc, _, _ = _run(["run", "experiments/demo"])
+            self.assertEqual(rc, 0)
+            body = (exp / "agent-task.md").read_text(encoding="utf-8")
+            self.assertIn("role_play", body)
+            # Copilot contract: external agent plays the actor
+            self.assertIn("Copilot Mode", body)
+            self.assertIn("policy file", body)
+            # Auto Mode execution note (v1.1): should now mention it is auto-executed
+            self.assertIn("Auto Mode", body)
+            # must NOT say "not auto-executed in v1" (the stale wording)
+            self.assertNotIn("not auto-executed in v1", body)
+
     def test_auto_mode_does_not_generate_agent_task(self):
         # Auto Mode executes (exit 0) and must NOT generate agent-task.md (that is
         # Copilot Mode's artifact).

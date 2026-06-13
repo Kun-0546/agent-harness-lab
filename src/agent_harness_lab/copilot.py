@@ -194,12 +194,23 @@ def render_agent_task(exp_dir: Path, spec: ExperimentSpec) -> str:
               f"The user side of each case is driven by a **{_cell(st)}** simulator."]
         if st == "script":
             L.append(f"- script: `{_cell(sraw.get('script'))}` — run it to produce each user turn.")
+        elif st == "scripted":
+            _mt = sraw.get("max_turns")
+            pb = sraw.get("playbook")
+            L.append(f"- playbook: `{_cell(pb)}` · max_turns: "
+                     f"{_cell(_mt) if _mt is not None else '(unset)'}")
+            L.append(f"- User turns are driven deterministically by the playbook file "
+                     f"`{_cell(pb)}`. Issue the playbook's follow-up messages in order "
+                     f"(one per turn, turn 1 onward); stop when the sequence ends or "
+                     f"max_turns is reached.")
         elif st == "role_play":
             _mt = sraw.get("max_turns")
             L.append(f"- actor: {_cell(sraw.get('actor'))} · max_turns: "
                      f"{_cell(_mt) if _mt is not None else '(unset)'} · policy: `{_cell(sraw.get('policy'))}`")
-            L.append("- role_play is not auto-executed in v1 — you (the external agent) play the actor "
-                     "per the policy file for up to max_turns.")
+            L.append("- In Copilot Mode you (the external agent) play the actor per the "
+                     "policy file (four sections: Persona / Background / Strategy / Stop). "
+                     "In Auto Mode (`hlab run` with `AHL_SIM_*` configured), role_play is "
+                     "executed automatically by the simulator engine.")
         else:  # single_turn
             L.append("- single_turn: send each case input once; no multi-turn user simulation.")
         L.append("")

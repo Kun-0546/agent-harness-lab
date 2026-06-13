@@ -80,12 +80,15 @@ two layers:
 | Area | Implemented in v1 | Not implemented |
 |------|-------------------|-----------------|
 | Run modes | Copilot, Auto | — |
-| Auto layers | Auto Run; **bounded/deterministic** Auto Optimize (copy-only + `mutation_script`) | LLM-based mutation; fully autonomous, remote/distributed optimization; general self-improvement engine |
+| Auto layers | Auto Run; **bounded/deterministic** Auto Optimize (copy-only + `mutation_script`; **single_turn only** — multi-turn simulator inside the optimize loop is rejected at review) | LLM-based mutation; fully autonomous, remote/distributed optimization; general self-improvement engine |
 | Connectors | `local_cli`, `script` | `remote_devbox`, `api`, `bridge`, `manual` — declarable but **not executed** (rejected by review) |
-| Evaluation | `benchmark` (deterministic script); `llm_judge` (**real LLM judging** when `AHL_JUDGE_BASE_URL` / `AHL_JUDGE_MODEL` / `AHL_JUDGE_API_KEY` are set; any OpenAI-compatible endpoint — Anthropic etc. via a compatible gateway; **pending** without a key — never a fabricated verdict); `human_annotation` (ingests an annotation file, else **pending**) | streaming / multi-model judging; per-provider protocols (no `AHL_JUDGE_PROVIDER`) |
+| Evaluation | `benchmark` (deterministic script); `llm_judge` (**real LLM judging** when `AHL_JUDGE_BASE_URL` / `AHL_JUDGE_MODEL` / `AHL_JUDGE_API_KEY` are set; any OpenAI-compatible endpoint — Anthropic etc. via a compatible gateway; **pending** without a key — never a fabricated verdict); `human_annotation` (ingests an annotation file, else **pending**); `llm_rubric` (v1.1 — dimension-weighted LLM scoring: a rubric markdown table declares named dimensions + weights; per-dimension scores and weighted total stored in score records; same `AHL_JUDGE_*` config as `llm_judge`; no key → **pending**) | streaming / multi-model judging; per-provider protocols (no `AHL_JUDGE_PROVIDER`) |
+| Multi-turn simulators (v1.1) | Three types: `role_play` (an LLM plays the user from a four-section policy card; needs `AHL_SIM_*`; no key → `simulator_unconfigured` error, never a fabricated follow-up); `scripted` (deterministic playbook — zero LLM calls, zero keys); `script` (external program decides each user turn — fully custom logic). `single_turn` is still the default and is frozen. Auto Optimize supports `single_turn` only | — |
+| Multi-trial | `execution.trials: N` repeats the run N times (append-by-default evidence); `hlab run --trials N` per-run override; `hlab run --fresh` starts clean; `hlab eval --trial N` evaluates a historical trial; compare emits mean/stddev/win_rate across trials | — |
 | State policies | `isolated`, `reset` (executed) | `cumulative`, `snapshot_branch`, `replay` — declarable → WARN, not executed |
 | Reporting | `reports/report.md` + a real `reports/report.html` (stdlib renderer, no dependency); `compare` → `reports/compare.json`; `conclude` → `conclusion.md` | hosted dashboard; HTML charts |
 | Output | evidence tree (traces / raw / artifacts / scores / inspections / issues) | — |
+| Runtime source pinning (v1.1) | Experiments can pin runtimes to a source (`local_path` / `git_repo` / `harness_package`) with an optional patch, producing snapshot evidence (`evidence/snapshots/<runtime_id>.json` with source_dir_hash / commit_sha / patch_hash) that drives the `strong` evidence tier in compare reports; `hlab review` runs a read-only source health check (existence, reachability, fingerprint) and emits reconcilable fingerprints for comparison against the post-run snapshot | — |
 
 If a step is pending or unrun, AHL says so in `review`, `status`, and the report.
 
@@ -133,6 +136,9 @@ hlab init                   initialize a workspace (goal.md, evaluation-methods/
 hlab new <name>             scaffold an experiment; --template <name> for a complete runnable one
 hlab review <experiment>    validate experiment.yaml before running (PASS / WARN / ERROR)
 hlab run <experiment>       Copilot: render agent-task.md · Auto: run + collect + inspect + evaluate
+hlab eval <experiment>      re-run all evaluation tracks against existing evidence (scores recomputed;
+                            evidence read-only — traces/raw/issues never modified; enables
+                            human_annotation backflow: run → pending → write annotation → eval → scored)
 hlab status <experiment>    show status + evidence / evaluation state
 hlab report <experiment>    build reports/report.md (+ report.html) from the evidence
 hlab compare <experiment>   summarize the A/B result into reports/compare.json
@@ -157,8 +163,9 @@ Every command honors one exit-code contract (so a loop or a script can gate on i
 
 `ahl` (the retired v0.x stack) no longer runs: its workspace format is **not**
 compatible with `hlab`, and old `ahl` commands do not map 1:1 onto the v1 surface.
-Start fresh with `hlab init`; a migration guide (`migrating-from-ahl.md`) is planned
-for v1.1.
+Start fresh with `hlab init`; the migration guide
+([`docs/migrating-from-ahl.md`](docs/migrating-from-ahl.md)) maps each old `ahl`
+file onto its v1 equivalent.
 
 ## Specification
 

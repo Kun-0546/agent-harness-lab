@@ -65,8 +65,9 @@ class TestPublicVocabulary(unittest.TestCase):
             if isinstance(a, argparse._SubParsersAction):
                 choices = set(a.choices)
                 self.assertNotIn("harness-packages", choices)
-                self.assertEqual(choices, {"init", "new", "review", "run", "status",
-                                           "report", "compare", "conclude"})
+                # v1.1 PR4 adds `eval` (9th command, spec-explicit channel)
+                self.assertEqual(choices, {"init", "new", "review", "run", "eval",
+                                           "status", "report", "compare", "conclude"})
 
 
 if __name__ == "__main__":

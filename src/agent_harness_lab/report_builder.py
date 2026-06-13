@@ -81,6 +81,17 @@ def _read_records(evidence_dir: Path, track_id: str | None) -> list[dict]:
     return recs
 
 
+def _read_records_trial(evidence_dir: Path, track_id: str | None,
+                        trial: int) -> list[dict]:
+    """Score records for a specific trial (PR5 5b multi-trial aggregation).
+
+    Filters by `trial` field (absent = trial 0). Used by compare.py to build
+    per-trial harness score vectors for aggregation statistics."""
+    all_recs = _read_records(evidence_dir, track_id)
+    return [r for r in all_recs
+            if isinstance(r, dict) and (r.get("trial") or 0) == trial]
+
+
 def _harness_scores(records: list[dict]) -> dict[str, dict]:
     """Group benchmark records by harness_id → {passed, total, mean}."""
     out: dict[str, dict] = {}
@@ -222,17 +233,35 @@ def _build_markdown(exp_dir: Path, spec: ExperimentSpec) -> str:
     L.append("")
 
     # ---- Evidence (per runtime) ----
+    # Defect 13: wire v1 evidence-level surface.  Per-runtime evidence level is
+    # derived from evidence/snapshots/<rt>.json via the v0.4 rules
+    # (evidence.py:infer_evidence_from_snapshot) — the same rules Stack A used.
+    # local_path with source_dir_hash → STRONG; git_repo with commit_sha +
+    # source_dir_hash → STRONG; no snapshot → UNKNOWN.
+    from agent_harness_lab.evidence import infer_evidence_from_snapshot
     L.append("## Evidence")
     if spec.agent_runtimes:
+        materials_dir = exp_dir / "materials"
         for r in spec.agent_runtimes:
             tr = _read_jsonl(evidence_dir / "traces" / f"{r.id}.jsonl")
             raw_dir = evidence_dir / "raw" / r.id
             n_raw = len(list(raw_dir.glob("*.out"))) if raw_dir.is_dir() else 0
             art_dir = evidence_dir / "artifacts" / r.id
             n_art = len([p for p in art_dir.rglob("*") if p.is_file()]) if art_dir.is_dir() else 0
+            # Load snapshot and infer evidence level
+            snap_path = evidence_dir / "snapshots" / f"{r.id}.json"
+            snap_dict = None
+            if snap_path.is_file():
+                try:
+                    snap_dict = json.loads(snap_path.read_text(encoding="utf-8"))
+                except (json.JSONDecodeError, OSError):
+                    pass
+            ev_info = infer_evidence_from_snapshot(snap_dict, materials_dir)
+            ev_level = ev_info.get("level", "unknown")
             L.append(f"- `{r.id}` (harness `{r.harness}`, connector "
                      f"{_connector_type(exp_dir, r)}): {len(tr)} trace(s), "
-                     f"{n_raw} raw output(s), {n_art} artifact file(s)")
+                     f"{n_raw} raw output(s), {n_art} artifact file(s), "
+                     f"evidence level: **{ev_level}**")
     else:
         L.append("- (no agent runtimes)")
     L.append("")
@@ -316,6 +345,12 @@ def _build_markdown(exp_dir: Path, spec: ExperimentSpec) -> str:
 
     # ---- Methodology (how the numbers above were produced; plain text only) ----
     L.append("## Methodology")
+    # PR5 5b: state trial count when multiple trials were run
+    from agent_harness_lab.compare import _trial_count as _tc
+    _n_trials = _tc(evidence_dir)
+    if _n_trials > 1:
+        L.append(f"- **Trial count:** {_n_trials} trials were run "
+                 f"(aggregation: {', '.join(spec.aggregation or ['mean', 'stddev', 'win_rate'])})")
     if spec.tracks:
         method_of = {e.id: e.method for e in spec.evaluators if isinstance(e.id, str)}
         for tr in spec.tracks:
@@ -333,6 +368,22 @@ def _build_markdown(exp_dir: Path, spec: ExperimentSpec) -> str:
              "JSON (the scale is benchmark-defined; the shipped benchmarks use 0-1); "
              "`llm_judge` scores are 0-100 as returned by the judge model; "
              "`human_annotation` scores are read verbatim from the annotation file.")
+    # Defect 13: Methodology evidence level summary (per v0.4 rules, §15.4)
+    if spec.agent_runtimes:
+        from agent_harness_lab.evidence import infer_evidence_from_snapshot
+        L.append("- **Evidence levels (per-runtime, v0.4 rules):**")
+        for r in spec.agent_runtimes:
+            snap_path = evidence_dir / "snapshots" / f"{r.id}.json"
+            snap_dict = None
+            if snap_path.is_file():
+                try:
+                    snap_dict = json.loads(snap_path.read_text(encoding="utf-8"))
+                except (json.JSONDecodeError, OSError):
+                    pass
+            ev_info = infer_evidence_from_snapshot(snap_dict, exp_dir / "materials")
+            ev_level = ev_info.get("level", "unknown")
+            ev_reasons = "; ".join(ev_info.get("reasons") or [])
+            L.append(f"  - `{r.id}`: **{ev_level}** — {ev_reasons or '(no snapshot)'}")
     L.append("")
 
     # Objective

@@ -583,11 +583,16 @@ class TestSimulator(_Base):
         self._with_sim("simulator:\n  type: role_play\n  max_turns: 3\n")
         self.assertIn("simulator_field_missing", self._codes(ERROR))
 
-    def test_role_play_under_auto_warns_unimplemented(self):
+    def test_role_play_under_auto_executable_no_unimplemented_warn(self):
+        # v1.1: role_play IS executable by Auto Mode — the old
+        # simulator_roleplay_unimplemented WARN is gone; a missing policy file
+        # under auto is now an ERROR (was WARN). See test_multiturn_v1.py for
+        # the full v1.1 simulator review matrix.
         doc = _doc().replace("  mode: copilot", "  mode: auto") + (
             "simulator:\n  type: role_play\n  actor: ceo\n  max_turns: 6\n  policy: cases/sim.md\n")
         self._write(doc)
-        self.assertIn("simulator_roleplay_unimplemented", self._codes(WARN))
+        self.assertNotIn("simulator_roleplay_unimplemented", self._codes())
+        self.assertIn("simulator_policy_ref_missing", self._codes(ERROR))
 
 
 class TestAutoOptimizeSchema(_Base):

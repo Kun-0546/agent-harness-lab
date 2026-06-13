@@ -18,6 +18,8 @@ from typing import Any
 
 import yaml
 
+from agent_harness_lab import mdutil, user_sim
+
 # --- allowed value sets (docs/experiment-yaml-schema.md) ---------------------
 
 STATUS_VALUES = {
@@ -28,15 +30,21 @@ RUN_MODES = {"copilot", "auto"}
 EXECUTION_MODES = {"ab", "sequential", "longitudinal", "replay"}
 STATE_POLICIES = {"isolated", "reset", "cumulative", "snapshot_branch", "replay"}
 AUTO_V1_STATE_POLICIES = {"isolated", "reset"}
+# valid aggregation statistics for execution.aggregation (PR5 5b)
+AGGREGATION_VALUES = {"mean", "stddev", "min_max", "median", "win_rate"}
+AGGREGATION_DEFAULT = ["mean", "stddev", "win_rate"]
 CONNECTOR_TYPES = {"local_cli", "script", "remote_devbox", "api", "bridge", "manual"}
 AUTO_V1_CONNECTORS = {"local_cli", "script"}
-EVAL_METHODS = {"human_annotation", "llm_judge", "benchmark"}
+EVAL_METHODS = {"human_annotation", "llm_judge", "benchmark", "llm_rubric"}
 # evidence types an evaluation track may consume (collection keys + the two
 # stores that are always written: inspections output and issues.jsonl).
 EVIDENCE_TYPES = {
     "traces", "raw", "artifacts", "snapshots", "scores", "inspections", "issues",
 }
-SIMULATOR_TYPES = {"single_turn", "script", "role_play"}
+SIMULATOR_TYPES = {"single_turn", "script", "role_play", "scripted"}
+# simulator types that drive a multi-turn conversation (v1.1): per-case fresh
+# session, turn loop, partial-transcript contract (execution-model.md §14).
+MULTI_TURN_SIMULATOR_TYPES = {"role_play", "scripted", "script"}
 # Auto Optimize (schema/review only in this phase; the loop is NOT implemented):
 # surfaces Auto must never modify unless explicitly allowed. Keyed by the leading
 # path/name segment (goal.md→goal, cases/→cases, evaluation/→evaluation, etc.).
@@ -101,12 +109,17 @@ class AgentRuntimeSpec:
     Accepts both shapes documented in the spec bundle:
       - top-level `type:` (experiment-yaml-schema.md §12)
       - nested `connector: {type: ...}` (execution-model.md §7)
+
+    source: is an optional section declaring where to materialize the runtime from
+    before dispatch (PR6). When present, auto.py will copytree/clone/verify into
+    sandbox/<rt_id>/ and redirect the connector's working_dir there.
     """
     path: Path
     id: str | None
     connector_type: str | None
     raw: dict[str, Any]
     artifacts: list[dict] = field(default_factory=list)  # artifacts.collect[] rules
+    source: "Any | None" = None  # RuntimeSourceSpec | None — parsed from source: section
 
 
 @dataclass
@@ -170,6 +183,8 @@ class ExperimentSpec:
     run_mode: str | None = None
     execution_mode: str | None = None
     state_policy: str | None = None
+    trials: int = 1                                      # execution.trials (PR5 5b)
+    aggregation: list[str] = field(default_factory=lambda: list(AGGREGATION_DEFAULT))
     harnesses: list[HarnessRef] = field(default_factory=list)
     agent_runtimes: list[AgentRuntimeRef] = field(default_factory=list)
     cases_root: str | None = None
@@ -378,6 +393,18 @@ def parse_experiment_yaml(path: Path) -> ExperimentSpec:
     cases_files = _list_field(cases, "files", "cases.files", malformed)
     report_formats = [str(x) for x in _list_field(reports, "formats", "reports.formats", malformed)]
 
+    # execution.trials / execution.aggregation (PR5 5b)
+    _trials_raw = execution.get("trials") if isinstance(execution, dict) else None
+    _trials = 1
+    if _trials_raw is not None:
+        if isinstance(_trials_raw, int) and _trials_raw >= 1:
+            _trials = _trials_raw
+        # else: validation happens in validate_spec
+    _agg_raw = execution.get("aggregation") if isinstance(execution, dict) else None
+    _agg: list[str] = list(AGGREGATION_DEFAULT)
+    if isinstance(_agg_raw, list):
+        _agg = [str(x) for x in _agg_raw]
+
     return ExperimentSpec(
         path=path,
         id=data.get("id"),
@@ -387,6 +414,8 @@ def parse_experiment_yaml(path: Path) -> ExperimentSpec:
         run_mode=(run.get("mode") if isinstance(run, dict) else None),
         execution_mode=(execution.get("mode") if isinstance(execution, dict) else None),
         state_policy=(execution.get("state_policy") if isinstance(execution, dict) else None),
+        trials=_trials,
+        aggregation=_agg,
         harnesses=harnesses,
         agent_runtimes=runtimes,
         cases_root=(cases.get("root") if isinstance(cases, dict) else None),
@@ -431,8 +460,17 @@ def load_agent_runtime_spec(path: Path) -> AgentRuntimeSpec:
     _a = data.get("artifacts")
     if isinstance(_a, dict) and isinstance(_a.get("collect"), list):
         arts = [x for x in _a["collect"] if isinstance(x, dict)]
+    # source: section (PR6 — optional; when present, auto.py materializes before dispatch)
+    source_spec = None
+    _src = data.get("source")
+    if _src is not None:
+        from agent_harness_lab.materialize_v1 import parse_source_spec
+        try:
+            source_spec = parse_source_spec(_src, path)
+        except ValueError as e:
+            raise ExperimentSpecError(str(e)) from e
     return AgentRuntimeSpec(path=path, id=data.get("id"), connector_type=ctype,
-                            raw=data, artifacts=arts)
+                            raw=data, artifacts=arts, source=source_spec)
 
 
 def load_cases(cases_root: Path, files: list[str]) -> list[dict]:
@@ -529,7 +567,7 @@ def validate_spec(spec: ExperimentSpec, experiment_dir: Path) -> list[Problem]:
                          f"`{label}.{k}` is not a recognized key in experiment.yaml; it will be ignored")
 
     _warn_unknown(_raw.get("run"), {"mode"}, "run")
-    _warn_unknown(_raw.get("execution"), {"mode", "state_policy"}, "execution")
+    _warn_unknown(_raw.get("execution"), {"mode", "state_policy", "trials", "aggregation"}, "execution")
     _warn_unknown(_raw.get("cases"), {"root", "files"}, "cases")
     _warn_unknown(_raw.get("evaluation"), {"root", "methods", "evaluators", "tracks"}, "evaluation")
     _warn_unknown(_raw.get("reports"), {"formats"}, "reports")
@@ -544,7 +582,7 @@ def validate_spec(spec: ExperimentSpec, experiment_dir: Path) -> list[Problem]:
         for _i, _tr in enumerate(_eval_for_warn.get("tracks") or []):
             _warn_unknown(_tr, {"id", "question", "evaluators", "evidence"}, f"evaluation.tracks[{_i}]")
     _warn_unknown(_raw.get("simulator"),
-                  {"type", "script", "actor", "max_turns", "policy"}, "simulator")
+                  {"type", "script", "actor", "max_turns", "policy", "playbook"}, "simulator")
     _warn_unknown(_raw.get("objective"),
                   {"primary_track", "success_criteria", "optimize_for"}, "objective")
     _warn_unknown(_raw.get("optimization"),
@@ -618,6 +656,22 @@ def validate_spec(spec: ExperimentSpec, experiment_dir: Path) -> list[Problem]:
         err("bad_state_policy",
             f"`execution.state_policy` in experiment.yaml is {spec.state_policy!r}; "
             f"use one of {sorted(STATE_POLICIES)}")
+
+    # execution.trials / execution.aggregation (PR5 5b)
+    _raw_exec = spec.raw.get("execution") if isinstance(spec.raw, dict) else None
+    if isinstance(_raw_exec, dict):
+        _trials_raw = _raw_exec.get("trials")
+        if _trials_raw is not None:
+            if not isinstance(_trials_raw, int) or _trials_raw < 1:
+                err("bad_trials",
+                    f"`execution.trials` must be a positive integer; got {_trials_raw!r}")
+        _agg_raw = _raw_exec.get("aggregation")
+        if isinstance(_agg_raw, list):
+            bad = [x for x in _agg_raw if not isinstance(x, str) or x not in AGGREGATION_VALUES]
+            if bad:
+                err("bad_aggregation",
+                    f"`execution.aggregation` contains unknown entries {bad!r}; "
+                    f"valid values: {sorted(AGGREGATION_VALUES)}")
 
     # harnesses
     if "harnesses" not in malformed and not spec.harnesses:
@@ -727,6 +781,19 @@ def validate_spec(spec: ExperimentSpec, experiment_dir: Path) -> list[Problem]:
                         f"agent runtime {r.id}: connector working_dir '{_wd}' does not "
                         f"exist relative to the experiment dir; create it or fix "
                         f"`connector.working_dir` in '{r.spec}'")
+                # Left-shifted from auto.py run-time check: the script connector
+                # is one fresh process per case with no turn IPC — it cannot keep
+                # a multi-turn conversation. This combination always fails at run
+                # time; reject it at review so users see a clear error earlier.
+                if (rt.connector_type == "script"
+                        and isinstance(spec.simulator, SimulatorSpec)
+                        and isinstance(spec.simulator.type, str)
+                        and spec.simulator.type in MULTI_TURN_SIMULATOR_TYPES):
+                    err("simulator_connector_unsupported",
+                        f"agent runtime {r.id}: connector type 'script' cannot drive a "
+                        f"multi-turn simulator (type={spec.simulator.type!r}); the script "
+                        f"connector spawns a fresh process per case and has no turn IPC — "
+                        f"use a 'local_cli' connector for multi-turn experiments")
 
         # artifacts.collect[]: user declares what artifacts the runtime may produce;
         # EvidenceCollector (Auto Mode phase) archives them under evidence/artifacts/.
@@ -771,6 +838,16 @@ def validate_spec(spec: ExperimentSpec, experiment_dir: Path) -> list[Problem]:
         # (artifact harvesting now runs in Auto Mode via the EvidenceCollector, so the
         # previous "harvest unimplemented" WARN is gone — it would be false.)
 
+        # source: section (PR6): validate shape only here.
+        # load_agent_runtime_spec already ran parse_source_spec and raised
+        # ExperimentSpecError for unknown type / missing required fields. Here we
+        # surface that error as a review problem (it was already raised as
+        # ExperimentSpecError and caught by the outer try/except → runtime_spec_invalid).
+        # If load succeeded, rt.source is a RuntimeSourceSpec or None.
+        # Existence/reachability/fingerprint checks (including patch file sources)
+        # are performed in Phase 2 of review_experiment (reviewer.py:_run_source_health_checks)
+        # with probe_* issue codes — see docs/v1-spec/cli.md §6 Phase 2.
+
     _r_ids = [r.id for r in spec.agent_runtimes if isinstance(r.id, str)]
     _r_dups = sorted({x for x in _r_ids if _r_ids.count(x) > 1})
     if _r_dups:
@@ -804,11 +881,15 @@ def validate_spec(spec: ExperimentSpec, experiment_dir: Path) -> list[Problem]:
                  "replay reuses existing evidence instead of rerunning the Agent Runtime, "
                  "but no evidence has been collected under evidence/ yet")
 
-    # simulator (optional): how the user side of multi-turn cases is driven.
-    # single_turn (Auto v1) / script (Auto-compatible) / role_play (Copilot/stretch).
+    # simulator (optional): how the user side of cases is driven. single_turn is
+    # the frozen default; role_play / scripted / script are the v1.1 multi-turn
+    # types (execution-model.md §14). A missing policy/playbook/script file is
+    # fatal under Auto Mode (the runner would dispatch nothing useful) and a WARN
+    # under Copilot (the file may legitimately be authored later).
     if isinstance(spec.simulator, SimulatorSpec):
         st = spec.simulator.type
         sraw = spec.simulator.raw if isinstance(spec.simulator.raw, dict) else {}
+        _file_missing = err if spec.run_mode == "auto" else warn
         if not isinstance(st, str) or st not in SIMULATOR_TYPES:
             err("bad_simulator_type",
                 f"`simulator.type` {st!r} is unknown; use one of {sorted(SIMULATOR_TYPES)}")
@@ -818,27 +899,98 @@ def validate_spec(spec: ExperimentSpec, experiment_dir: Path) -> list[Problem]:
                 err("simulator_script_missing",
                     "simulator type=script requires a `script:` path in experiment.yaml")
             elif not (experiment_dir / _scr).exists():
-                warn("simulator_script_ref_missing",
-                     f"simulator `script` '{_scr}' does not exist relative to the experiment dir; "
-                     f"create it or fix `simulator.script`")
+                _file_missing("simulator_script_ref_missing",
+                              f"simulator `script` '{_scr}' does not exist relative to the "
+                              f"experiment dir; create it or fix `simulator.script`")
+        elif st == "scripted":
+            _pb = sraw.get("playbook")
+            if not isinstance(_pb, str) or not _pb.strip():
+                err("simulator_playbook_missing",
+                    "simulator type=scripted requires a `playbook:` path in experiment.yaml")
+            elif not (experiment_dir / _pb).exists():
+                _file_missing("simulator_playbook_ref_missing",
+                              f"simulator `playbook` '{_pb}' does not exist relative to the "
+                              f"experiment dir; create it or fix `simulator.playbook`")
         elif st == "role_play":
             for _f in ("actor", "policy"):
                 if not isinstance(sraw.get(_f), str) or not str(sraw.get(_f)).strip():
                     err("simulator_field_missing",
                         f"simulator type=role_play requires a string `{_f}:` in experiment.yaml")
-            if "max_turns" in sraw and not isinstance(sraw.get("max_turns"), int):
-                err("bad_simulator_max_turns",
-                    "simulator.max_turns must be an integer in experiment.yaml")
             _pol = sraw.get("policy")
-            if isinstance(_pol, str) and _pol and not (experiment_dir / _pol).exists():
-                warn("simulator_policy_ref_missing",
-                     f"simulator `policy` '{_pol}' does not exist relative to the experiment dir")
-            if spec.run_mode == "auto":
-                warn("simulator_roleplay_unimplemented",
-                     "simulator type=role_play is not executable by Auto Mode v1 "
-                     "(Copilot/stretch); it will not be auto-run")
+            if isinstance(_pol, str) and _pol:
+                _ppath = experiment_dir / _pol
+                if not _ppath.exists():
+                    _file_missing("simulator_policy_ref_missing",
+                                  f"simulator `policy` '{_pol}' does not exist relative to the "
+                                  f"experiment dir; create it or fix `simulator.policy`")
+                elif _ppath.is_file():
+                    # four-section policy card (Persona/Background/Strategy/Stop,
+                    # EN/CN section names — schema §14a)
+                    try:
+                        _card = user_sim.parse_policy_card(_ppath)
+                    except (OSError, UnicodeError) as e:
+                        _card = None
+                        warn("simulator_policy_unreadable",
+                             f"simulator `policy` '{_pol}' cannot be read: {e}")
+                    if _card is not None:
+                        _empty = [n for n, v in (("Persona", _card.persona),
+                                                 ("Strategy", _card.strategy))
+                                  if not mdutil.is_filled(v)]
+                        if _empty:
+                            warn("simulator_policy_incomplete",
+                                 f"simulator policy card '{_pol}' is missing the "
+                                 f"{' / '.join(_empty)} section(s) (## Persona/## 人设, "
+                                 f"## Strategy/## 追问策略); the role_play user will be "
+                                 f"under-specified")
+                        if not mdutil.is_filled(_card.stop):
+                            warn("simulator_policy_no_stop",
+                                 f"simulator policy card '{_pol}' has no Stop section "
+                                 f"(## Stop / ## 收尾条件) — the conversation will end "
+                                 f"only on max_turns")
+        if (isinstance(st, str) and st in MULTI_TURN_SIMULATOR_TYPES
+                and "max_turns" in sraw and not isinstance(sraw.get("max_turns"), int)):
+            err("bad_simulator_max_turns",
+                "simulator.max_turns must be an integer in experiment.yaml")
 
     # --- Auto Optimize (objective + optimization): schema/review only; loop NOT built ---
+    # v1.1 boundary: the optimize loop supports single_turn only. A multi-turn
+    # simulator inside the loop would fail (or call an LLM) once per iteration —
+    # undefined behavior, so it is rejected here (execution-model.md §14.7).
+    if (isinstance(spec.optimization, OptimizationSpec) and spec.optimization.enabled
+            and isinstance(spec.simulator, SimulatorSpec)
+            and spec.simulator.type in MULTI_TURN_SIMULATOR_TYPES):
+        err("optimize_multiturn_unsupported",
+            f"`optimization.enabled: true` supports single_turn only in v1.1; "
+            f"simulator type {spec.simulator.type!r} is multi-turn — disable "
+            f"optimization or use `simulator.type: single_turn`")
+
+    # Defect 9 (LEFT-SHIFT): Auto Optimize × source — reject at review time.
+    # v1.1 scopes optimize to sourceless single_turn only. A runtime declaring
+    # source: inside the optimize loop causes materialize to override
+    # working_dir_override (the candidate dir), so the optimize iteration runs the
+    # pristine sandbox instead of the candidate — promotion decisions on unrelated
+    # data. Reject the combination so users see a clear error at review time.
+    if (isinstance(spec.optimization, OptimizationSpec) and spec.optimization.enabled):
+        _runtimes_with_source = []
+        for _rt_ref in spec.agent_runtimes:
+            if not isinstance(_rt_ref.spec, str) or not _rt_ref.spec:
+                continue
+            _sp = experiment_dir / _rt_ref.spec
+            if not _sp.is_file():
+                continue
+            try:
+                _rt = load_agent_runtime_spec(_sp)
+                if _rt.source is not None:
+                    _runtimes_with_source.append(_rt_ref.id or _rt.id or "?")
+            except ExperimentSpecError:
+                pass
+        if _runtimes_with_source:
+            err("optimize_source_unsupported",
+                f"`optimization.enabled: true` is incompatible with `source:` declarations "
+                f"in v1.1 (optimize loop is sourceless single_turn only); "
+                f"runtimes with source: {_runtimes_with_source}. "
+                f"Remove source: from the optimize experiment or disable optimization "
+                f"(execution-model.md §15.1, §14.7)")
     _track_ids = {t.id for t in spec.tracks if isinstance(t.id, str)}
     if isinstance(spec.objective, ObjectiveSpec):
         pt = spec.objective.primary_track
@@ -962,6 +1114,47 @@ def validate_spec(spec: ExperimentSpec, experiment_dir: Path) -> list[Problem]:
                 warn("evaluator_ref_missing",
                      f"evaluator {ev.id}: `{_key}` '{_val}' does not exist under "
                      f"{_eval_root_rel.rstrip('/')}/; create it or fix the evaluator in experiment.yaml")
+        # llm_rubric: rubric file is required and must contain a parseable dimensions table.
+        if ev.method == "llm_rubric":
+            _rub_val = ev.rubric
+            if not isinstance(_rub_val, str) or not _rub_val.strip():
+                err("rubric_missing_dimensions",
+                    f"evaluator {ev.id}: `llm_rubric` requires a `rubric:` path pointing at a "
+                    f"rubric markdown file (e.g. rubrics/my_rubric.md under the evaluation root)")
+            else:
+                _rub_path = experiment_dir / _eval_root_rel / _rub_val
+                if _rub_path.is_file():
+                    try:
+                        _rub_text = _rub_path.read_text(encoding="utf-8")
+                        from agent_harness_lab.evaluation import _parse_rubric_table
+                        _dims = _parse_rubric_table(_rub_text)
+                        if not _dims:
+                            err("rubric_invalid",
+                                f"evaluator {ev.id}: rubric file '{_rub_val}' has no "
+                                f"dimensions+weights table; add a markdown table with columns "
+                                f"`Dimension`, `Weight`, `Description` "
+                                f"(see docs/v1-spec/experiment-yaml-schema.md §14b)")
+                        else:
+                            _neg = [d["name"] for d in _dims if d["weight"] < 0]
+                            if _neg:
+                                err("rubric_invalid",
+                                    f"evaluator {ev.id}: rubric file '{_rub_val}' has negative "
+                                    f"weight(s) for dimension(s) {_neg}; all weights must be >= 0")
+                            else:
+                                _wsum = sum(d["weight"] for d in _dims)
+                                if _wsum <= 0:
+                                    err("rubric_invalid",
+                                        f"evaluator {ev.id}: rubric file '{_rub_val}' has an "
+                                        f"all-zero weight sum; at least one weight must be > 0")
+                                elif abs(_wsum - 1.0) > 0.01:
+                                    warn("rubric_weights_normalized",
+                                         f"evaluator {ev.id}: rubric file '{_rub_val}' weights "
+                                         f"sum to {_wsum:.4g} (not ~1.0); they will be normalised "
+                                         f"automatically at scoring time")
+                    except Exception as _rub_e:  # noqa: BLE001
+                        err("rubric_invalid",
+                            f"evaluator {ev.id}: rubric file '{_rub_val}' could not be parsed: "
+                            f"{_rub_e}")
     _ev_dups = sorted({x for x in _ev_ids if _ev_ids.count(x) > 1})
     if _ev_dups:
         err("duplicate_evaluator_id",
@@ -1044,9 +1237,8 @@ def validate_spec(spec: ExperimentSpec, experiment_dir: Path) -> list[Problem]:
                     err("bad_inspection_value",
                         f"`inspection.{k}` must be true/false in experiment.yaml; got {v!r}")
                 elif v and k != "artifact_review":
-                    # honesty (same pattern as simulator_roleplay_unimplemented):
-                    # skill/memory/context review are declarable-only in v1 — the
-                    # Inspector runs its fixed checks, never a dedicated <k>.
+                    # honesty: skill/memory/context review are declarable-only in v1 —
+                    # the Inspector runs its fixed checks, never a dedicated <k>.
                     warn("inspection_review_unimplemented",
                          f"`inspection.{k}: true` is declared but not executed in v1 "
                          f"(declarable-only); no {k} will be performed")
