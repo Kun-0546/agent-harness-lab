@@ -45,7 +45,7 @@ SIMULATOR_TYPES = {"single_turn", "script", "role_play", "scripted"}
 # simulator types that drive a multi-turn conversation (v1.1): per-case fresh
 # session, turn loop, partial-transcript contract (execution-model.md §14).
 MULTI_TURN_SIMULATOR_TYPES = {"role_play", "scripted", "script"}
-# Auto Optimize (schema/review only in this phase; the loop is NOT implemented):
+# Auto Optimize (schema/validation only here; the loop itself lives in auto_optimize.py):
 # surfaces Auto must never modify unless explicitly allowed. Keyed by the leading
 # path/name segment (goal.md→goal, cases/→cases, evaluation/→evaluation, etc.).
 PROTECTED_SURFACE_DEFAULTS = {"goal", "cases", "evaluation", "objective", "conclusion"}
@@ -366,7 +366,7 @@ def parse_experiment_yaml(path: Path) -> ExperimentSpec:
         simulator = SimulatorSpec(type=_sim.get("type"), raw=_sim)
     elif _sim is not None:
         bad_entries.append("simulator")
-    # objective / optimization (Auto Optimize — schema/review only; loop NOT implemented)
+    # objective / optimization (Auto Optimize — schema/validation here; loop runs in auto_optimize.py)
     _obj = data.get("objective")
     objective = None
     if isinstance(_obj, dict):
@@ -952,7 +952,7 @@ def validate_spec(spec: ExperimentSpec, experiment_dir: Path) -> list[Problem]:
             err("bad_simulator_max_turns",
                 "simulator.max_turns must be an integer in experiment.yaml")
 
-    # --- Auto Optimize (objective + optimization): schema/review only; loop NOT built ---
+    # --- Auto Optimize (objective + optimization): schema/validation only; loop implemented in auto_optimize.py ---
     # v1.1 boundary: the optimize loop supports single_turn only. A multi-turn
     # simulator inside the loop would fail (or call an LLM) once per iteration —
     # undefined behavior, so it is rejected here (execution-model.md §14.7).

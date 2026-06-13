@@ -172,14 +172,6 @@ pip install -e .
 若 shell 提示 `hlab: command not found`，说明脚本目录不在 PATH 上 —— 加进去，或直接用
 `python -m agent_harness_lab`（Windows 上是 `py -m agent_harness_lab`）。
 
-## 相关工作
-
-- **Heuristic Learning** —— Jiayi Weng，《Learning Beyond Gradients》(2026)：编码 agent
-  通过编辑代码（规则、状态、测试、记忆）来改进一个软件系统，而非训练网络参数。AHL 是跑这类
-  循环的工具。
-- **Karpathy 的 AutoResearch**（2026）展示了针对固定目标的 ML 训练自动研究循环。AHL 处理的是
-  相邻的问题 —— AI *产品*研究，目标本身在不断修订。作为参照，而非模板。
-
 ## 作者
 
 由 Kun 开发，AI 产品经理。

@@ -196,15 +196,6 @@ If your shell reports `hlab: command not found`, the script directory isn't on y
 PATH — add it, or run `python -m agent_harness_lab` (`py -m agent_harness_lab` on
 Windows).
 
-## Related work
-
-- **Heuristic Learning** — Jiayi Weng, *Learning Beyond Gradients* (2026): a coding
-  agent improves a software system by editing code — rules, state, tests, memory —
-  rather than training network parameters. AHL is a tool for running that kind of loop.
-- **Karpathy's AutoResearch** (2026) demonstrated an automated research loop on ML
-  training against a fixed objective. AHL addresses an adjacent problem — AI *product*
-  research, where the goal itself is under revision. A reference, not a template.
-
 ## Author
 
 Built by Kun, an AI Product Manager.
