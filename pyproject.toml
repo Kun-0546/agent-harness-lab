@@ -2,6 +2,7 @@
 name = "agent-harness-lab"
 version = "1.1.0"
 description = "Run goal-driven harness experiments on real Agent Runtimes."
+readme = "README.md"
 # Python 3.13 is NOT yet supported: a reviewer reported an intermittent test-suite
 # hang on 3.13.5 that could not be reproduced or fixed with confidence. Pinned out
 # until it is resolved and verified on a 3.13.x environment.
@@ -48,6 +49,13 @@ Changelog = "https://github.com/Kun-0546/agent-harness-lab/releases"
 [project.scripts]
 hlab = "agent_harness_lab.cli:main"
 ahl = "agent_harness_lab.cli:ahl_redirect"
+
+[tool.pytest.ini_options]
+# Scope collection to the canonical suite. Without this, a bare `pytest` from the
+# repo root crawls temp/ (handoff-bundle copies of the test files) and aborts with
+# import-file-mismatch collection errors. Run `pytest` and you get tests/ only.
+testpaths = ["tests"]
+norecursedirs = ["temp", "output", ".git", "*.egg-info"]
 
 [build-system]
 requires = ["setuptools>=68"]
