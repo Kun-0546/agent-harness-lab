@@ -247,6 +247,52 @@ def _cli(args):
     return rc, out.getvalue() + err.getvalue()
 
 
+class TestWorkflowIntegrityGates(unittest.TestCase):
+    def _fresh_template(self, root: Path) -> Path:
+        self.assertEqual(_cli(["init"])[0], 0)
+        self.assertEqual(_cli(["new", "memory-policy-ab",
+                               "--template", "memory-policy-ab-lite"])[0], 0)
+        return root / "experiments" / "memory-policy-ab"
+
+    def test_compare_before_scores_fails_without_writing_file(self):
+        with tempfile.TemporaryDirectory() as tmp, _chdir(Path(tmp)):
+            exp = self._fresh_template(Path(tmp))
+            rc, out = _cli(["compare", "experiments/memory-policy-ab"])
+            self.assertEqual(rc, 1)
+            self.assertIn("HLAB_MISSING_COMPARISON", out)
+            self.assertFalse((exp / "reports" / "compare.json").exists())
+
+    def test_conclude_rejects_unknown_winner(self):
+        with tempfile.TemporaryDirectory() as tmp, _chdir(Path(tmp)):
+            exp = self._fresh_template(Path(tmp))
+            rc, out = _cli(["conclude", "experiments/memory-policy-ab",
+                            "--winner", "not-a-harness", "--reason", "x"])
+            self.assertEqual(rc, 1)
+            self.assertIn("Unknown winner", out)
+            self.assertFalse((exp / "conclusion.md").exists())
+
+    def test_conclude_with_winner_requires_comparison(self):
+        with tempfile.TemporaryDirectory() as tmp, _chdir(Path(tmp)):
+            exp = self._fresh_template(Path(tmp))
+            rc, out = _cli(["conclude", "experiments/memory-policy-ab",
+                            "--winner", "B", "--reason", "x"])
+            self.assertEqual(rc, 1)
+            self.assertIn("before comparison", out)
+            self.assertFalse((exp / "conclusion.md").exists())
+
+    def test_conclude_rejects_malformed_comparison(self):
+        with tempfile.TemporaryDirectory() as tmp, _chdir(Path(tmp)):
+            exp = self._fresh_template(Path(tmp))
+            (exp / "reports").mkdir(exist_ok=True)
+            (exp / "reports" / "compare.json").write_text(
+                '[{"harnesses": "not-an-object"}]', encoding="utf-8")
+            rc, out = _cli(["conclude", "experiments/memory-policy-ab",
+                            "--winner", "B", "--reason", "x"])
+            self.assertEqual(rc, 1)
+            self.assertIn("Invalid comparison", out)
+            self.assertFalse((exp / "conclusion.md").exists())
+
+
 class TestCompletionPathE2E(unittest.TestCase):
     def test_full_path_winner_b_no_key(self):
         with tempfile.TemporaryDirectory() as tmp, \

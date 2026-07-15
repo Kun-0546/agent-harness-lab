@@ -108,17 +108,21 @@ Compare two or more harnesses on the same cases.
 
 ### sequential
 
-Run harnesses or versions in sequence.
+Intended to run harnesses or versions in sequence. Parseable for Copilot/schema
+compatibility; Auto review ERROR until implemented.
 
 ### longitudinal
 
-Run cases across accumulated state.
+Intended to run cases across accumulated state. Parseable for Copilot/schema
+compatibility; Auto review ERROR until implemented.
 
 Used for memory/evolution experiments.
 
 ### replay
 
-Run evaluation/reporting on existing evidence without rerunning Agent Runtime.
+Intended to run evaluation/reporting on existing evidence without rerunning Agent
+Runtime. Auto review ERROR until a dedicated replay engine exists; use `hlab eval`
+and `hlab report` today.
 
 ## 4. State Policies
 
@@ -139,7 +143,14 @@ isolated
 reset
 ```
 
-Cumulative and snapshot_branch may be represented before fully implemented.
+`isolated` starts a fresh process in a disposable working-tree copy for every
+case. `reset` starts a fresh process for every case but keeps the declared working
+directory, so filesystem state may carry. Cumulative, snapshot_branch, and replay
+remain parseable but are Auto review errors until their execution semantics exist.
+
+Auto execution currently implements `ab` only. `sequential`, `longitudinal`, and
+`replay` are blocked at review time rather than silently routed through the A/B
+dispatcher. Existing evidence is reprocessed with `hlab eval` / `hlab report`.
 
 ## 5. Core Runtime Objects
 

@@ -605,12 +605,12 @@ class TestAutoMultiturnScripted(unittest.TestCase):
             self.assertEqual(r2["turns"], 2)
             self.assertEqual([t["user"] for t in r2["transcript"]],
                              ["world", "only-one"])
-            # per-case FRESH session: reply numbering restarts at r1 per case,
-            # and the agent logged one start per case
+            # Per-case FRESH session: reply numbering restarts at r1 per case.
+            # Under isolated, starts.log lives only in each disposable case copy;
+            # the declared working directory remains pristine.
             self.assertTrue(r1["transcript"][0]["agent"].startswith("r1:"))
             self.assertTrue(r2["transcript"][0]["agent"].startswith("r1:"))
-            starts = (exp / "rt" / "starts.log").read_text(encoding="utf-8")
-            self.assertEqual(starts.count("start"), 2)
+            self.assertFalse((exp / "rt" / "starts.log").exists())
             # raw concatenates the turns in order
             raw = (exp / "evidence" / "raw" / "runtime-a" / "case-001.out").read_text(
                 encoding="utf-8")
@@ -822,6 +822,11 @@ class TestStatePolicyResetMultiturn(unittest.TestCase):
                      '{"id":"case-002","input":"world"}\n')
             exp = _setup(ws, sim_block=_SCRIPTED_BLOCK, agent=_ECHO_STATEFUL,
                          cases=cases, files={"cases/playbook.yaml": "default: []\n"})
+            yaml_path = exp / "experiment.yaml"
+            yaml_path.write_text(
+                yaml_path.read_text(encoding="utf-8").replace(
+                    "state_policy: isolated", "state_policy: reset"),
+                encoding="utf-8")
             rc, _, _ = _run_cli(["run", "experiments/demo"])
             self.assertEqual(rc, 0)
             starts = (exp / "rt" / "starts.log").read_text(encoding="utf-8")

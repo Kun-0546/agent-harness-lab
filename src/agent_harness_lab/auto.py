@@ -37,6 +37,7 @@ import subprocess
 import sys
 import tempfile
 from collections.abc import Callable
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -232,6 +233,25 @@ def _snapshot(working_dir: Path) -> dict[str, tuple]:
                 except OSError:
                     pass
     return snap
+
+
+@contextmanager
+def _isolated_case_workspace(working_dir: Path):
+    """Yield a disposable copy of ``working_dir`` for one case.
+
+    ``isolated`` means both process state and filesystem state are case-scoped.
+    A fresh process alone is insufficient for coding agents because files written
+    by case 1 would otherwise be visible to case 2.  The copy is removed after
+    evidence/artifacts have been collected.  ``reset`` deliberately keeps using
+    the declared working directory and only restarts the process.
+    """
+    tmp_root = Path(tempfile.mkdtemp(prefix="ahl-isolated-case-"))
+    case_dir = tmp_root / "workspace"
+    try:
+        shutil.copytree(working_dir, case_dir, symlinks=True)
+        yield case_dir
+    finally:
+        robust_rmtree(tmp_root)
 
 
 def _read_text(p: Path) -> str:
@@ -595,68 +615,130 @@ def _dispatch_local_cli(ev: EvidenceCollector, rt_ref, command, working_dir: Pat
         _env = dict(os.environ)
         _env.update(env_overlay)
 
-    if sim_plan is not None:
-        # multi-turn (v1.1): a FRESH session per case — the reset code path. A
-        # multi-turn case needs the agent process to keep THIS case's context
-        # across turns, so under multi-turn the isolation unit of `isolated` is
-        # the case, not the send (execution-model.md §14.2). A per-case failure
-        # is isolated; later cases still get a clean session.
-        for idx, case in enumerate(cases):
-            try:
-                sess = _SandboxCliSession(command, cwd=working_dir, timeout=timeout,
-                                          env_override=_env)
-            except Exception as e:  # noqa: BLE001
-                cid = _case_id(case, idx)
-                result.dispatched += 1
-                ev.issue("connector_failure",
-                         f"runtime {rt_ref.id} case {cid}: cannot start connector: {e}",
-                         runtime_id=rt_ref.id, case_id=cid, harness_id=rt_ref.harness)
-                continue
-            try:
-                _multiturn_case(ev, rt_ref, sess, case, idx, working_dir, rules,
-                                result, sim_plan)
-            finally:
-                sess.close()  # the dispatch layer owns the session lifecycle
-        return
-
-    if state_policy == "reset":
-        # reset (StatePolicy): reuse the runtime spec but restart a FRESH process
-        # before each case, so no in-process state carries across cases. Each case is
-        # independent, so a per-case start/turn failure is isolated — later cases still
-        # get a clean session (unlike the isolated path, which stops on a dead session).
-        for idx, case in enumerate(cases):
-            try:
-                sess = _SandboxCliSession(command, cwd=working_dir, timeout=timeout,
-                                          env_override=_env)
-            except Exception as e:  # noqa: BLE001
-                cid = _case_id(case, idx)
-                result.dispatched += 1
-                ev.issue("connector_failure",
-                         f"runtime {rt_ref.id} case {cid}: cannot start connector: {e}",
-                         runtime_id=rt_ref.id, case_id=cid, harness_id=rt_ref.harness)
-                continue
-            try:
-                _local_cli_case(ev, rt_ref, sess, case, idx, working_dir, rules, result)
-            finally:
-                sess.close()
-        return
-
-    # isolated (default): one persistent session for all cases. local_cli agents are
-    # request/response (stateless per send), so reusing the process keeps each case
-    # independent; a dead connector stops this runtime (the session cannot recover).
-    try:
-        sess = _SandboxCliSession(command, cwd=working_dir, timeout=timeout,
-                                  env_override=_env)
-    except Exception as e:  # noqa: BLE001
-        ev.issue("connector_failure", f"runtime {rt_ref.id}: cannot start connector: {e}",
+    if state_policy not in (None, "isolated", "reset"):
+        ev.issue("connector_failure",
+                 f"runtime {rt_ref.id}: state_policy {state_policy!r} is not executable; "
+                 f"review should have blocked this run",
                  runtime_id=rt_ref.id, harness_id=rt_ref.harness)
         return
+
+    def run_one(case, idx: int, case_working_dir: Path) -> None:
+        """One fresh connector process for one case.
+
+        Multi-turn keeps this process for all turns in the case; single-turn sends
+        exactly one request.  Later cases never inherit in-process state.
+        """
+        try:
+            sess = _SandboxCliSession(command, cwd=case_working_dir, timeout=timeout,
+                                      env_override=_env)
+        except Exception as e:  # noqa: BLE001
+            cid = _case_id(case, idx)
+            result.dispatched += 1
+            ev.issue("connector_failure",
+                     f"runtime {rt_ref.id} case {cid}: cannot start connector: {e}",
+                     runtime_id=rt_ref.id, case_id=cid, harness_id=rt_ref.harness)
+            return
+        try:
+            if sim_plan is not None:
+                _multiturn_case(ev, rt_ref, sess, case, idx, case_working_dir,
+                                rules, result, sim_plan)
+            else:
+                _local_cli_case(ev, rt_ref, sess, case, idx, case_working_dir,
+                                rules, result)
+        finally:
+            sess.close()
+
+    for idx, case in enumerate(cases):
+        if state_policy in (None, "isolated"):
+            # Strong isolation: each case gets both a fresh process and a disposable
+            # working-tree copy.  Artifacts are collected before the copy is removed.
+            try:
+                with _isolated_case_workspace(working_dir) as case_working_dir:
+                    run_one(case, idx, case_working_dir)
+            except Exception as e:  # noqa: BLE001 — copy/read/cleanup failure
+                cid = _case_id(case, idx)
+                result.dispatched += 1
+                ev.issue("connector_failure",
+                         f"runtime {rt_ref.id} case {cid}: cannot create isolated "
+                         f"working directory: {e}",
+                         runtime_id=rt_ref.id, case_id=cid, harness_id=rt_ref.harness)
+        else:
+            # reset: fresh process per case, shared declared filesystem.
+            run_one(case, idx, working_dir)
+
+
+def _script_case(ev: EvidenceCollector, rt_ref, command: str, working_dir: Path,
+                 timeout: float, rules, case, idx: int, result: AutoRunResult,
+                 script_env: dict | None) -> None:
+    """Execute one script-connector case in the supplied case working directory."""
+    cid = _case_id(case, idx)
+    result.dispatched += 1
+    out_dir = ev.dir / "raw" / rt_ref.id / cid
+    out_dir.mkdir(parents=True, exist_ok=True)
+    case_file = out_dir / "case.json"
+    case_file.write_text(json.dumps(case, ensure_ascii=False), encoding="utf-8")
+    baseline = _snapshot(working_dir)
+    cmd = command.replace("{case_file}", f'"{case_file}"').replace(
+        "{output_dir}", f'"{out_dir}"')
+    # Redirect the child's stdout/stderr to files and sweep the whole process
+    # group afterward so a background worker cannot outlive the case.
+    so_path, se_path = out_dir / "stdout.txt", out_dir / "stderr.txt"
+    timed_out = False
+    proc = None
+    pgid = None
     try:
-        for idx, case in enumerate(cases):
-            if not _local_cli_case(ev, rt_ref, sess, case, idx, working_dir, rules, result):
-                break  # connector is dead → stop this runtime
-    finally:
-        sess.close()
+        with open(so_path, "w", encoding="utf-8") as fo, \
+                open(se_path, "w", encoding="utf-8") as fe:
+            proc = subprocess.Popen(
+                cmd, shell=True, cwd=str(working_dir),
+                stdin=subprocess.DEVNULL, stdout=fo, stderr=fe,
+                text=True, encoding="utf-8", close_fds=True, start_new_session=_POSIX,
+                env=script_env,
+            )
+            pgid = _pgid_of(proc)
+            try:
+                proc.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                timed_out = True
+    except Exception as e:  # noqa: BLE001 — process/open failures become evidence
+        if proc is not None:
+            _sweep_group(proc, pgid)
+        stdout, stderr = _read_text(so_path), _read_text(se_path)
+        ev.raw(rt_ref.id, cid, stdout, stderr)
+        ev.issue("connector_failure",
+                 f"runtime {rt_ref.id} case {cid}: cannot execute script connector: {e}",
+                 runtime_id=rt_ref.id, case_id=cid, harness_id=rt_ref.harness)
+        ev.trace(rt_ref.id, {"case_id": cid, "runtime_id": rt_ref.id,
+                             "harness_id": rt_ref.harness, "ok": False,
+                             "error": str(e)})
+        result.traces_written += 1
+        return
+    assert proc is not None  # successful process creation is required past this point
+    _sweep_group(proc, pgid)
+    stdout, stderr = _read_text(so_path), _read_text(se_path)
+    ev.raw(rt_ref.id, cid, stdout, stderr)
+    if timed_out:
+        ev.issue("connector_failure",
+                 f"runtime {rt_ref.id} case {cid}: script timed out after {timeout:g}s",
+                 runtime_id=rt_ref.id, case_id=cid, harness_id=rt_ref.harness)
+        ev.trace(rt_ref.id, {"case_id": cid, "runtime_id": rt_ref.id,
+                             "harness_id": rt_ref.harness, "ok": False,
+                             "error": "timeout"})
+        result.traces_written += 1
+        return
+    rc = proc.returncode
+    ok = rc == 0
+    ev.trace(rt_ref.id, {"case_id": cid, "runtime_id": rt_ref.id,
+                         "harness_id": rt_ref.harness, "input": case.get("input"),
+                         "exit_code": rc, "ok": ok})
+    result.traces_written += 1
+    if not ok:
+        ev.issue("case_failure", f"runtime {rt_ref.id} case {cid}: script exited {rc}",
+                 runtime_id=rt_ref.id, case_id=cid, harness_id=rt_ref.harness)
+    elif not (stdout or "").strip():
+        ev.issue("empty_output", f"runtime {rt_ref.id} case {cid}: script produced no stdout",
+                 runtime_id=rt_ref.id, case_id=cid, harness_id=rt_ref.harness)
+    ev.collect_artifacts(working_dir, rules, rt_ref.id, cid, rt_ref.harness, baseline)
 
 
 def _dispatch_script(ev: EvidenceCollector, rt_ref, command, working_dir: Path,
@@ -677,66 +759,29 @@ def _dispatch_script(ev: EvidenceCollector, rt_ref, command, working_dir: Path,
     if env_overlay:
         _script_env = dict(os.environ)
         _script_env.update(env_overlay)
-    # The script connector spawns a fresh process per case, so each case starts from
-    # the runtime's on-disk state with no carried in-process state — isolated and reset
-    # are both inherently satisfied here. state_policy is accepted for a uniform
-    # dispatch signature; cumulative/snapshot_branch are not executed in Auto v1.
+    if state_policy not in (None, "isolated", "reset"):
+        ev.issue("connector_failure",
+                 f"runtime {rt_ref.id}: state_policy {state_policy!r} is not executable; "
+                 f"review should have blocked this run",
+                 runtime_id=rt_ref.id, harness_id=rt_ref.harness)
+        return
+
     for idx, case in enumerate(cases):
-        cid = _case_id(case, idx)
-        result.dispatched += 1
-        out_dir = ev.dir / "raw" / rt_ref.id / cid
-        out_dir.mkdir(parents=True, exist_ok=True)
-        case_file = out_dir / "case.json"
-        case_file.write_text(json.dumps(case, ensure_ascii=False), encoding="utf-8")
-        baseline = _snapshot(working_dir)  # per-case artifact isolation
-        cmd = command.replace("{case_file}", f'"{case_file}"').replace(
-            "{output_dir}", f'"{out_dir}"')
-        # Redirect the child's stdout/stderr to FILES, not pipes, and wait on the
-        # DIRECT child with proc.wait(timeout). Completion is then the child's own
-        # exit — it never depends on pipe-EOF, so a worker the script backgrounds
-        # (or any unrelated process that inherited a fd) can no longer hold a pipe
-        # open and park communicate() forever (the canonical Linux hang). There is
-        # also no pipe buffer to fill. We sweep the whole process group afterward
-        # (normal exit AND timeout) so no grandchild lingers.
-        so_path, se_path = out_dir / "stdout.txt", out_dir / "stderr.txt"
-        timed_out = False
-        with open(so_path, "w", encoding="utf-8") as fo, \
-                open(se_path, "w", encoding="utf-8") as fe:
-            proc = subprocess.Popen(
-                cmd, shell=True, cwd=str(working_dir),
-                stdin=subprocess.DEVNULL, stdout=fo, stderr=fe,
-                text=True, encoding="utf-8", close_fds=True, start_new_session=_POSIX,
-                env=_script_env,
-            )
-            pgid = _pgid_of(proc)
+        if state_policy in (None, "isolated"):
             try:
-                proc.wait(timeout=timeout)
-            except subprocess.TimeoutExpired:
-                timed_out = True
-        _sweep_group(proc, pgid)  # reap the direct child + any backgrounded worker
-        stdout, stderr = _read_text(so_path), _read_text(se_path)
-        ev.raw(rt_ref.id, cid, stdout, stderr)
-        if timed_out:
-            ev.issue("connector_failure",
-                     f"runtime {rt_ref.id} case {cid}: script timed out after {timeout:g}s",
-                     runtime_id=rt_ref.id, case_id=cid, harness_id=rt_ref.harness)
-            ev.trace(rt_ref.id, {"case_id": cid, "runtime_id": rt_ref.id,
-                                 "harness_id": rt_ref.harness, "ok": False, "error": "timeout"})
-            result.traces_written += 1
-            continue
-        rc = proc.returncode
-        ok = rc == 0
-        ev.trace(rt_ref.id, {"case_id": cid, "runtime_id": rt_ref.id,
-                             "harness_id": rt_ref.harness, "input": case.get("input"),
-                             "exit_code": rc, "ok": ok})
-        result.traces_written += 1
-        if not ok:
-            ev.issue("case_failure", f"runtime {rt_ref.id} case {cid}: script exited {rc}",
-                     runtime_id=rt_ref.id, case_id=cid, harness_id=rt_ref.harness)
-        elif not (stdout or "").strip():
-            ev.issue("empty_output", f"runtime {rt_ref.id} case {cid}: script produced no stdout",
-                     runtime_id=rt_ref.id, case_id=cid, harness_id=rt_ref.harness)
-        ev.collect_artifacts(working_dir, rules, rt_ref.id, cid, rt_ref.harness, baseline)
+                with _isolated_case_workspace(working_dir) as case_working_dir:
+                    _script_case(ev, rt_ref, command, case_working_dir, timeout,
+                                 rules, case, idx, result, _script_env)
+            except Exception as e:  # noqa: BLE001
+                cid = _case_id(case, idx)
+                result.dispatched += 1
+                ev.issue("connector_failure",
+                         f"runtime {rt_ref.id} case {cid}: cannot create isolated "
+                         f"working directory: {e}",
+                         runtime_id=rt_ref.id, case_id=cid, harness_id=rt_ref.harness)
+        else:
+            _script_case(ev, rt_ref, command, working_dir, timeout,
+                         rules, case, idx, result, _script_env)
 
 
 def _next_trial(evidence_dir: Path) -> int:

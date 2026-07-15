@@ -29,6 +29,7 @@ STATUS_VALUES = {
 RUN_MODES = {"copilot", "auto"}
 EXECUTION_MODES = {"ab", "sequential", "longitudinal", "replay"}
 STATE_POLICIES = {"isolated", "reset", "cumulative", "snapshot_branch", "replay"}
+AUTO_V1_EXECUTION_MODES = {"ab"}
 AUTO_V1_STATE_POLICIES = {"isolated", "reset"}
 # valid aggregation statistics for execution.aggregation (PR5 5b)
 AGGREGATION_VALUES = {"mean", "stddev", "min_max", "median", "win_rate"}
@@ -652,6 +653,11 @@ def validate_spec(spec: ExperimentSpec, experiment_dir: Path) -> list[Problem]:
         err("bad_execution_mode",
             f"`execution.mode` in experiment.yaml is {spec.execution_mode!r}; "
             f"use one of {sorted(EXECUTION_MODES)}")
+    elif spec.run_mode == "auto" and spec.execution_mode not in AUTO_V1_EXECUTION_MODES:
+        err("auto_execution_mode_unsupported",
+            f"Auto Mode currently executes only {sorted(AUTO_V1_EXECUTION_MODES)}; "
+            f"`execution.mode: {spec.execution_mode}` is declarable but not executable. "
+            f"Use `ab`, or use `hlab eval` / `hlab report` to work with existing evidence")
     if spec.state_policy and (not isinstance(spec.state_policy, str) or spec.state_policy not in STATE_POLICIES):
         err("bad_state_policy",
             f"`execution.state_policy` in experiment.yaml is {spec.state_policy!r}; "
@@ -854,24 +860,24 @@ def validate_spec(spec: ExperimentSpec, experiment_dir: Path) -> list[Problem]:
         err("duplicate_runtime_id",
             f"duplicate agent runtime id(s) {_r_dups} in experiment.yaml; each runtime needs a unique id")
 
-    # Auto Mode state policy support (schema §9: Auto v1 must support isolated/reset)
+    # Auto Mode state policy support. Unsupported values are a hard gate: allowing
+    # the normal Auto dispatch path to continue would silently execute different
+    # semantics (most dangerously, replay would start the runtime again).
     if (spec.run_mode == "auto" and isinstance(spec.state_policy, str)
             and spec.state_policy in STATE_POLICIES
             and spec.state_policy not in AUTO_V1_STATE_POLICIES):
-        warn("auto_state_policy_unimplemented",
-             f"Auto Mode v1 implements {sorted(AUTO_V1_STATE_POLICIES)}; "
-             f"`{spec.state_policy}` may be expressible before fully implemented")
+        err("auto_state_policy_unsupported",
+            f"Auto Mode currently executes only {sorted(AUTO_V1_STATE_POLICIES)}; "
+            f"`execution.state_policy: {spec.state_policy}` is declarable but not "
+            f"executable, so the run is blocked instead of silently using another policy")
 
     # per-StatePolicy review semantics — every value is handled, none is an inert enum:
-    #   isolated        : each case/harness run is independent — fully supported, no extra config.
-    #   reset           : runtime reused but reset (fresh process) before each run — IMPLEMENTED
-    #                     in Auto Mode (AutoRunner restarts the local_cli session per case; the
-    #                     script connector is already a fresh process per case). No WARN needed.
-    #   cumulative      : state persists across cases (see auto_state_policy_unimplemented).
-    #   snapshot_branch : branch from a shared snapshot (see snapshots_not_collected below).
-    #   replay          : do not rerun the runtime; evaluate already-collected evidence.
+    #   isolated        : fresh process + disposable working-tree copy per case.
+    #   reset           : fresh process per case, shared declared filesystem.
+    #   cumulative / snapshot_branch / replay: parseable but Auto-blocked above.
     _sp = spec.state_policy if isinstance(spec.state_policy, str) and spec.state_policy in STATE_POLICIES else None
-    if _sp == "replay" or spec.execution_mode == "replay":
+    if (spec.run_mode != "auto"
+            and (_sp == "replay" or spec.execution_mode == "replay")):
         ev_dir = experiment_dir / "evidence"
         _has_evidence = ev_dir.is_dir() and any(
             d.is_dir() and any(f.name != ".gitkeep" for f in d.iterdir())

@@ -167,23 +167,28 @@ isolated
 reset
 ```
 
-Other state policies may be expressible before fully implemented. Every value has
-explicit review semantics (none is an inert enum):
+Other state policies remain parseable for schema/Copilot compatibility, but Auto
+Mode blocks them at review time. Every value has explicit review semantics:
 
 ```text
-isolated         each case/harness run is independent — fully supported, no extra config
-reset            runtime reused, fresh process before each run (no in-process state carries);
-                 IMPLEMENTED in Auto — AutoRunner restarts the local_cli session per case, and
-                 the script connector is already a fresh process per case
-cumulative       state persists across cases; Auto -> auto_state_policy_unimplemented WARN
-snapshot_branch  branch from a shared snapshot; Auto -> auto_state_policy_unimplemented WARN;
+isolated         fresh process + disposable working-tree copy per case; no process or
+                 filesystem state carries — fully supported
+reset            fresh process per case in the declared shared working directory;
+                 process state resets, filesystem state may carry — fully supported
+cumulative       state persists across cases; Auto -> auto_state_policy_unsupported ERROR
+snapshot_branch  branch from a shared snapshot; Auto -> auto_state_policy_unsupported ERROR;
                  + collection.snapshots off -> snapshots_not_collected WARN
-replay           do not rerun the runtime; evaluate existing evidence; no evidence -> replay_no_evidence WARN
+replay           parseable but Auto -> auto_state_policy_unsupported ERROR; use
+                 `hlab eval` / `hlab report` for existing evidence
 ```
+
+Auto execution supports `execution.mode: ab` only. `sequential`, `longitudinal`,
+and `replay` are rejected with `auto_execution_mode_unsupported` in Auto Mode;
+they are never routed through the A/B runner as if their semantics were equivalent.
 
 Under a multi-turn simulator (v1.1) the isolation unit of `isolated` is the
 **case**, not the send — see [`execution-model.md`](execution-model.md) §14.2.
-Single-turn semantics are unchanged.
+Single-turn and multi-turn now use the same case-scoped process/filesystem boundary.
 
 ### execution.trials / execution.aggregation (v1.1)
 

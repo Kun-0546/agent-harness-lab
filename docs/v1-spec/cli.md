@@ -188,7 +188,9 @@ hlab new memory-policy-ab --template memory-policy-ab-lite
 - `--mode copilot|auto` (default `copilot`); with `auto`, the scaffold writes a
   runnable placeholder echo agent under `harnesses/` so the first `run` works
   out of the box (its output carries a visible `PLACEHOLDER` marker).
-- `--execution ab|sequential|longitudinal|replay` (default `ab`).
+- `--execution ab|sequential|longitudinal|replay` (default `ab`). Auto scaffolding
+  accepts `ab` only; the other values remain available to Copilot/schema workflows
+  and are Auto review errors until implemented.
 - `--question TEXT` — the one-line experiment question, written into
   `experiment.yaml`; without it a `<placeholder>` is scaffolded and `hlab review`
   warns. Ignored (with a notice) when combined with `--template`.
@@ -253,6 +255,8 @@ that network issues may be transient.
 | `optimize_multiturn_unsupported` | ERROR | `optimization.enabled: true` + a multi-turn simulator declared |
 | `optimize_source_unsupported` | ERROR | `optimization.enabled: true` + any Agent Runtime declares `source:` — optimize mutates harness files but source sandboxes are rebuilt per-invocation, so mutations would be lost |
 | `simulator_connector_unsupported` | ERROR | a multi-turn simulator declared + an Agent Runtime with connector type `script` — the script connector spawns a fresh process per case and has no turn IPC; use `local_cli` |
+| `auto_execution_mode_unsupported` | ERROR | Auto Mode declares `sequential`, `longitudinal`, or `replay`; only `ab` is executable |
+| `auto_state_policy_unsupported` | ERROR | Auto Mode declares `cumulative`, `snapshot_branch`, or `replay`; the run is blocked rather than using another policy |
 
 (Full list: see `experiment-yaml-schema.md §14a` and §18.)
 
@@ -432,7 +436,12 @@ Output:
 reports/compare.json
 ```
 
-Exit codes: `0`; `1` experiment not found, review ERROR, or unparseable yaml.
+The command writes no output file unless at least two declared harnesses have
+scores on the primary evaluation track. This prevents an unrun or partially
+evaluated experiment from looking like a completed comparison.
+
+Exit codes: `0`; `1` experiment not found, review ERROR, unparseable yaml, or
+fewer than two comparable harnesses.
 
 ## 11. hlab conclude
 
@@ -450,7 +459,12 @@ Output:
 conclusion.md
 ```
 
-Exit codes: `0`; `1` experiment or `experiment.yaml` not found / unparseable.
+When `--winner` is supplied, it must name a declared harness with a comparable
+score in `reports/compare.json`; otherwise no conclusion is written. A conclusion
+without `--winner` remains valid for human decisions that do not select a harness.
+
+Exit codes: `0`; `1` experiment or `experiment.yaml` not found / unparseable,
+unknown winner, missing/invalid comparison, or winner without a comparable score.
 
 ## 12. hlab eval
 

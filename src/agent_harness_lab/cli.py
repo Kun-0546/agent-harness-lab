@@ -98,7 +98,7 @@ def cmd_init(args: argparse.Namespace) -> int:
     print()
     print("Next:")
     print("  1. Edit goal.md — what behavior of which agent are you improving?")
-    print("  2. hlab new <experiment-name>   (--mode copilot|auto, --execution ab|sequential|longitudinal|replay)")
+    print("  2. hlab new <experiment-name>   (--mode copilot|auto; Auto executes --execution ab)")
     print("  3. hlab review experiments/<name>")
     return 0
 
@@ -115,6 +115,11 @@ def cmd_new(args: argparse.Namespace) -> int:
         return 1
     template = getattr(args, "template", None)
     question = getattr(args, "question", None)
+    if not template and args.mode == "auto" and args.execution != "ab":
+        print(f"Cannot scaffold Auto execution mode {args.execution!r}: Auto currently "
+              "executes only 'ab'. Use `--execution ab`; use `hlab eval` / "
+              "`hlab report` for existing evidence.", file=sys.stderr)
+        return 1
     try:
         result = scaffold.new_experiment(
             root, args.name, run_mode=args.mode, execution_mode=args.execution,
@@ -718,7 +723,19 @@ def cmd_compare(args: argparse.Namespace) -> int:
         print(str(e), file=sys.stderr)
         return 1
     from agent_harness_lab import compare
-    out_path, data = compare.write_comparison(exp_dir, spec)
+    data = compare.build_comparison(exp_dir, spec)
+    comparable = [h for h in data.get("harnesses", [])
+                  if isinstance(h, dict)
+                  and isinstance(h.get("total"), (int, float))
+                  and not isinstance(h.get("total"), bool)
+                  and h["total"] > 0]
+    if len(comparable) < 2:
+        print("HLAB_MISSING_COMPARISON: fewer than two harnesses have scores on "
+              f"primary track {data.get('primary_track')!r} — run and evaluate the "
+              "A/B experiment before `hlab compare`; no compare.json was written",
+              file=sys.stderr)
+        return 1
+    out_path, data = compare.write_comparison(exp_dir, spec, data=data)
     print(compare.format_summary(data))
     print()
     print(f"compare written: {out_path}")
@@ -741,6 +758,38 @@ def cmd_conclude(args: argparse.Namespace) -> int:
     except ExperimentSpecError as e:
         print(str(e), file=sys.stderr)
         return 1
+    if args.winner:
+        harness_ids = {h.id for h in spec.harnesses if isinstance(h.id, str)}
+        if args.winner not in harness_ids:
+            print(f"Unknown winner {args.winner!r}: choose a declared harness id from "
+                  f"{sorted(harness_ids)}", file=sys.stderr)
+            return 1
+        compare_path = exp_dir / "reports" / "compare.json"
+        if not compare_path.is_file():
+            print("Cannot record a winning harness before comparison: run `hlab report` "
+                  f"and `hlab compare {args.experiment}` first.", file=sys.stderr)
+            return 1
+        try:
+            comparison = json.loads(compare_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            print(f"Cannot read {compare_path}; regenerate it with `hlab compare "
+                  f"{args.experiment}`.", file=sys.stderr)
+            return 1
+        if not isinstance(comparison, dict):
+            print(f"Invalid comparison in {compare_path}; regenerate it with `hlab compare "
+                  f"{args.experiment}`.", file=sys.stderr)
+            return 1
+        scored_ids = {
+            h.get("id") for h in comparison.get("harnesses", [])
+            if isinstance(h, dict)
+            and isinstance(h.get("total"), (int, float))
+            and not isinstance(h.get("total"), bool)
+            and h["total"] > 0
+        }
+        if args.winner not in scored_ids:
+            print(f"Cannot record winner {args.winner!r}: that harness has no comparable "
+                  "score in reports/compare.json.", file=sys.stderr)
+            return 1
     from agent_harness_lab import conclude
     out = conclude.write_conclusion(exp_dir, spec, winner=args.winner, reason=args.reason)
     print(f"conclusion recorded: {out}")
@@ -804,7 +853,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_new.add_argument("--mode", choices=["copilot", "auto"], default="copilot",
                        help="run mode (default: copilot)")
     p_new.add_argument("--execution", choices=["ab", "sequential", "longitudinal", "replay"],
-                       default="ab", help="execution mode (default: ab)")
+                       default="ab", help="execution mode (default: ab; Auto currently "
+                                          "executes ab only)")
     p_new.add_argument("--question", metavar="TEXT",
                        help="the one-line experiment question, written into experiment.yaml "
                             "(otherwise a <placeholder> is scaffolded and `hlab review` warns)")

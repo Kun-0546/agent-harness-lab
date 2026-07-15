@@ -39,11 +39,21 @@ class TestNew(unittest.TestCase):
 
     def test_new_yaml_reflects_flags(self):
         with redirect_stdout(io.StringIO()), workspace() as ws:
-            cli.main(["new", "memcmp", "--mode", "auto", "--execution", "longitudinal"])
+            cli.main(["new", "memcmp", "--mode", "copilot", "--execution", "longitudinal"])
             spec = parse_experiment_yaml(ws / "experiments" / "memcmp" / "experiment.yaml")
-            self.assertEqual(spec.run_mode, "auto")
+            self.assertEqual(spec.run_mode, "copilot")
             self.assertEqual(spec.execution_mode, "longitudinal")
             self.assertEqual(spec.id, "memcmp")
+
+    def test_new_rejects_unimplemented_auto_execution_mode(self):
+        with workspace() as ws:
+            err = io.StringIO()
+            with redirect_stderr(err):
+                rc = cli.main(["new", "memcmp", "--mode", "auto",
+                               "--execution", "longitudinal"])
+            self.assertEqual(rc, 1)
+            self.assertIn("executes only 'ab'", err.getvalue())
+            self.assertFalse((ws / "experiments" / "memcmp").exists())
 
     def test_new_uses_harness_not_variant(self):
         with redirect_stdout(io.StringIO()), workspace() as ws:

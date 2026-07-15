@@ -542,19 +542,27 @@ class TestStatePolicySemantics(_Base):
         self.assertNotIn("state_policy_reset_pending", w)
         self.assertNotIn("auto_state_policy_unimplemented", w)
 
-    def test_cumulative_warns_unimplemented(self):
+    def test_cumulative_is_blocked_in_auto(self):
         self._auto_with("cumulative")
-        self.assertIn("auto_state_policy_unimplemented", self._codes(WARN))
+        self.assertIn("auto_state_policy_unsupported", self._codes(ERROR))
 
-    def test_snapshot_branch_warns_snapshots_and_unimplemented(self):
+    def test_snapshot_branch_is_blocked_in_auto(self):
         self._auto_with("snapshot_branch")
+        e = self._codes(ERROR)
         w = self._codes(WARN)
-        self.assertIn("auto_state_policy_unimplemented", w)
+        self.assertIn("auto_state_policy_unsupported", e)
         self.assertIn("snapshots_not_collected", w)
 
-    def test_replay_warns_no_evidence(self):
+    def test_replay_is_blocked_in_auto_instead_of_rerunning(self):
         self._auto_with("replay", execution="replay")
-        self.assertIn("replay_no_evidence", self._codes(WARN))
+        e = self._codes(ERROR)
+        self.assertIn("auto_execution_mode_unsupported", e)
+        self.assertIn("auto_state_policy_unsupported", e)
+        self.assertNotIn("replay_no_evidence", self._codes(WARN))
+
+    def test_sequential_execution_is_blocked_in_auto(self):
+        self._auto_with("isolated", execution="sequential")
+        self.assertIn("auto_execution_mode_unsupported", self._codes(ERROR))
 
 
 class TestSimulator(_Base):
