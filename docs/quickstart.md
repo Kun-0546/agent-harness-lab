@@ -30,6 +30,10 @@ hlab compare <experiment>  summarize the A/B result into reports/compare.json
 hlab conclude <experiment> record your decision as conclusion.md (--winner, --reason)
 ```
 
+Auto execution currently supports `--execution ab` only. The other execution
+values remain available for Copilot/schema workflows and are rejected by Auto
+review until their runtime semantics are implemented.
+
 `hlab <cmd>` and `python -m agent_harness_lab <cmd>` are equivalent. Every command
 honors the exit-code contract in [`docs/v1-spec/cli.md`](v1-spec/cli.md): `0` success /
 `1` config or preflight error / `2` not implemented / `3` runtime failure.
@@ -154,6 +158,10 @@ execution:
   trials: 3
   aggregation: [mean, stddev, win_rate]
 ```
+
+`isolated` gives every case a fresh connector process and disposable working-tree
+copy. Use `reset` only when cases should get fresh processes while deliberately
+sharing filesystem changes.
 
 Then run as usual — the three trials are executed in one command:
 

@@ -14,6 +14,7 @@ import time
 import unittest
 from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from pathlib import Path
+from unittest import mock
 
 from agent_harness_lab import auto, cli, scaffold
 from agent_harness_lab.experiment_spec import parse_experiment_yaml
@@ -300,6 +301,22 @@ class TestAutoScript(unittest.TestCase):
             _run_cli(["run", "experiments/demo"])
             self.assertIn("case_failure", _issue_types(ws / "experiments" / "demo"))
 
+    def test_script_start_failure_is_recorded_once_with_trace(self):
+        with _workspace() as ws:
+            exp = _setup(ws, connector="script", agent=_SCRIPT_OK,
+                         required_artifact=False)
+            with mock.patch.object(auto.subprocess, "Popen",
+                                   side_effect=OSError("cannot spawn")):
+                rc, _, _ = _run_cli(["run", "experiments/demo"])
+            self.assertEqual(rc, 3)
+            self.assertEqual(_issue_types(exp).count("connector_failure"), 1)
+            records = [json.loads(line) for line in
+                       (exp / "evidence" / "traces" / "runtime-a.jsonl")
+                       .read_text(encoding="utf-8").splitlines() if line.strip()]
+            self.assertEqual(len(records), 1)
+            self.assertFalse(records[0]["ok"])
+            self.assertIn("cannot spawn", records[0]["error"])
+
     def test_script_timeout_bounded_and_failure(self):
         import time
         with _workspace() as ws:
@@ -398,6 +415,25 @@ class TestAutoBoundaries(unittest.TestCase):
             # AutoRunner never ran → no traces written
             self.assertFalse((ws / "experiments" / "demo" / "evidence" / "traces"
                               / "runtime-a.jsonl").exists())
+
+    def test_replay_is_review_blocked_and_never_starts_runtime(self):
+        with _workspace() as ws:
+            exp = _setup(ws, connector="local_cli")
+            (exp / "rt" / "agent.py").write_text(
+                "from pathlib import Path\nPath('started.txt').write_text('yes')\n"
+                + _ECHO_NO_ARTIFACT,
+                encoding="utf-8")
+            yaml_path = exp / "experiment.yaml"
+            yaml_path.write_text(
+                yaml_path.read_text(encoding="utf-8").replace(
+                    "execution:\n  mode: ab\n  state_policy: isolated",
+                    "execution:\n  mode: replay\n  state_policy: replay"),
+                encoding="utf-8")
+            rc, out, err = _run_cli(["run", "experiments/demo"])
+            self.assertEqual(rc, 1)
+            self.assertIn("auto_execution_mode_unsupported", out + err)
+            self.assertFalse((exp / "rt" / "started.txt").exists())
+            self.assertFalse((exp / "evidence" / "traces" / "runtime-a.jsonl").exists())
 
     def test_copilot_run_unchanged(self):
         # Auto Mode landing must not change Copilot Mode

@@ -255,9 +255,11 @@ def build_comparison(exp_dir: Path, spec: ExperimentSpec) -> dict:
     return result
 
 
-def write_comparison(exp_dir: Path, spec: ExperimentSpec) -> tuple[Path, dict]:
+def write_comparison(exp_dir: Path, spec: ExperimentSpec, *,
+                     data: dict | None = None) -> tuple[Path, dict]:
     """Write reports/compare.json and return (path, data)."""
-    data = build_comparison(exp_dir, spec)
+    if data is None:
+        data = build_comparison(exp_dir, spec)
     reports_dir = Path(exp_dir) / "reports"
     reports_dir.mkdir(parents=True, exist_ok=True)
     out = reports_dir / "compare.json"

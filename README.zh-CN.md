@@ -69,7 +69,7 @@ AHL 自己通过 connector 驱动 runtime 并收集证据。Auto Mode 有两层�
 | 评估 | `benchmark`（确定性脚本）；`llm_judge`（配置 `AHL_JUDGE_BASE_URL` / `AHL_JUDGE_MODEL` / `AHL_JUDGE_API_KEY` 时**调用真实 LLM 评判**；任意 OpenAI 兼容端点 —— Anthropic 等经兼容网关接入；没 key 则 **pending** —— 绝不编造评分）；`human_annotation`（有标注文件就读入，否则 **pending**）；`llm_rubric`（v1.1 —— 多维加权 LLM 评分：rubric markdown 表格声明各维度名称 + 权重，逐维打分后加权汇总为 0-100 总分，明细落 `dimensions` 字段；与 `llm_judge` 共用 `AHL_JUDGE_*` 配置；无 key → **pending**） | 流式 / 多模型评判；按 provider 分发协议（无 `AHL_JUDGE_PROVIDER`） |
 | 多轮 simulator（v1.1） | 三种类型：`role_play`（LLM 扮演用户，依据四段式 policy card；需要 `AHL_SIM_*`；无 key → `simulator_unconfigured` 错误，绝不编造跟进问题）；`scripted`（确定性 playbook —— 零 LLM 调用，零密钥）；`script`（外部程序决定每轮用户输入 —— 完全自定义逻辑）。`single_turn` 仍是默认值且已冻结。Auto Optimize 仅支持 `single_turn` | —— |
 | 多 trial | `execution.trials: N` 重复运行 N 次（追加式证据，不覆盖）；`hlab run --trials N` 单次覆盖；`hlab run --fresh` 清空重跑；`hlab eval --trial N` 评估历史 trial；compare 输出跨 trial 的 mean/stddev/win_rate | —— |
-| 状态策略 | `isolated`、`reset`（已执行） | `cumulative`、`snapshot_branch`、`replay` —— 可声明 → WARN，不执行 |
+| 状态策略 | `isolated`（每个 case 使用新进程和一次性工作目录副本）、`reset`（每个 case 使用新进程但共享文件系统） | `cumulative`、`snapshot_branch`、`replay` —— 为兼容可声明，但 Auto review **ERROR**，绝不静默按其他语义执行 |
 | 报告 | `reports/report.md` + 真正渲染的 `reports/report.html`（stdlib 渲染器，零依赖）；`compare` → `reports/compare.json`；`conclude` → `conclusion.md` | 托管面板；HTML 图表 |
 | 产出 | 证据树（traces / raw / artifacts / scores / inspections / issues） | —— |
 | Runtime 来源 pinning（v1.1） | 实验可将 runtime 锁定到一个来源（`local_path` / `git_repo` / `harness_package`），配合可选 patch，生成 snapshot 证据（`evidence/snapshots/<runtime_id>.json`，含 source_dir_hash / commit_sha / patch_hash），驱动 compare 报告的 `strong` 证据等级；`hlab review` 执行只读来源体检（存在性 / 可达性 / 指纹校验）并输出可与运行后 snapshot 对账的指纹 | —— |
@@ -125,6 +125,11 @@ hlab report <experiment>    从证据生成 reports/report.md（含 report.html�
 hlab compare <experiment>   把 A/B 结果汇总进 reports/compare.json
 hlab conclude <experiment>  把你的决定记为 conclusion.md（--winner、--reason）
 ```
+
+Auto 当前只执行 `execution.mode: ab`。解析器仍保留 `sequential`、
+`longitudinal`、`replay` 以兼容 Copilot 和既有 schema，但 Auto review 会直接
+报 ERROR，避免按错误语义启动 runtime。处理已有 evidence 请使用 `hlab eval` /
+`hlab report`。
 
 `hlab <cmd>` 与 `python -m agent_harness_lab <cmd>` 等价。
 

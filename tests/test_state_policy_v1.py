@@ -2,16 +2,12 @@
 
 The two state policies Auto v1 must support are *executable*, not just declarable:
 
-  isolated  one persistent connector session for all cases — in-process state is
-            reused across cases (local_cli agents are request/response, stateless
-            per send, so reuse stays independent; but if an agent *does* keep state,
-            it carries).
-  reset     a FRESH process is started before each case, so no in-process state
-            carries. AutoRunner restarts the local_cli session per case.
+  isolated  a fresh process and disposable working-tree copy per case; neither
+            in-process nor filesystem state carries.
+  reset     a fresh process per case in the shared declared working directory;
+            in-process state resets, while filesystem state may carry.
 
-We prove the mechanism with a stateful counter agent: it counts the sends it sees
-*within its own process*. Under isolated the count accumulates (1, 2, 3); under
-reset it is always 1 (each case is a brand-new process).
+We prove both boundaries with in-process and on-disk counter agents.
 """
 import io
 import json
@@ -33,6 +29,18 @@ _STATEFUL_COUNTER = (
     "    json.loads(line)\n"
     "    n+=1\n"
     "    sys.stdout.write(json.dumps({'response':'count:%d'%n})+'\\n')\n"
+    "    sys.stdout.flush()\n"
+)
+
+_FILE_STATEFUL_COUNTER = (
+    "import json,sys\n"
+    "from pathlib import Path\n"
+    "p=Path('state.txt')\n"
+    "for line in sys.stdin:\n"
+    "    json.loads(line)\n"
+    "    n=int(p.read_text() if p.exists() else '0')+1\n"
+    "    p.write_text(str(n))\n"
+    "    sys.stdout.write(json.dumps({'response':'file-count:%d'%n})+'\\n')\n"
     "    sys.stdout.flush()\n"
 )
 
@@ -70,13 +78,13 @@ def _workspace():
         tmp.cleanup()
 
 
-def _setup(root, state_policy):
+def _setup(root, state_policy, agent_code=_STATEFUL_COUNTER):
     scaffold.init_workspace(root)
     exp = scaffold.new_experiment(root, "demo", run_mode="auto").experiment_dir
     (exp / "experiment.yaml").write_text(_experiment_yaml(state_policy), encoding="utf-8")
     (exp / "cases" / "cases.jsonl").write_text(_THREE_CASES, encoding="utf-8")
     (exp / "rt").mkdir(exist_ok=True)
-    (exp / "rt" / "agent.py").write_text(_STATEFUL_COUNTER, encoding="utf-8")
+    (exp / "rt" / "agent.py").write_text(agent_code, encoding="utf-8")
     (exp / "agent-runtimes" / "runtime-a.yaml").write_text(
         f"id: runtime-a\nconnector:\n  type: local_cli\n"
         f"  command: {_EXE} agent.py\n  working_dir: ./rt\n  timeout: 20\n",
@@ -106,13 +114,12 @@ def _issue_types(exp):
 
 
 class TestStatePolicyExecution(unittest.TestCase):
-    def test_isolated_reuses_one_process_state_carries(self):
+    def test_isolated_restarts_process_per_case(self):
         with _workspace() as ws:
             exp = _setup(ws, "isolated")
             rc, _ = _run(["run", "experiments/demo"])
             self.assertEqual(rc, 0)
-            # one persistent process → the counter accumulates across the 3 cases
-            self.assertEqual(_responses(exp), ["count:1", "count:2", "count:3"])
+            self.assertEqual(_responses(exp), ["count:1", "count:1", "count:1"])
 
     def test_reset_restarts_fresh_process_per_case_state_does_not_carry(self):
         with _workspace() as ws:
@@ -121,6 +128,22 @@ class TestStatePolicyExecution(unittest.TestCase):
             self.assertEqual(rc, 0)
             # fresh process before each case → the counter resets every time
             self.assertEqual(_responses(exp), ["count:1", "count:1", "count:1"])
+
+    def test_isolated_discards_filesystem_state_between_cases(self):
+        with _workspace() as ws:
+            exp = _setup(ws, "isolated", _FILE_STATEFUL_COUNTER)
+            self.assertEqual(_run(["run", "experiments/demo"])[0], 0)
+            self.assertEqual(_responses(exp),
+                             ["file-count:1", "file-count:1", "file-count:1"])
+            self.assertFalse((exp / "rt" / "state.txt").exists())
+
+    def test_reset_preserves_filesystem_state_between_cases(self):
+        with _workspace() as ws:
+            exp = _setup(ws, "reset", _FILE_STATEFUL_COUNTER)
+            self.assertEqual(_run(["run", "experiments/demo"])[0], 0)
+            self.assertEqual(_responses(exp),
+                             ["file-count:1", "file-count:2", "file-count:3"])
+            self.assertEqual((exp / "rt" / "state.txt").read_text(), "3")
 
     def test_reset_dispatches_all_cases_cleanly(self):
         with _workspace() as ws:

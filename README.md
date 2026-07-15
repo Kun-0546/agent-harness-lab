@@ -85,7 +85,7 @@ two layers:
 | Evaluation | `benchmark` (deterministic script); `llm_judge` (**real LLM judging** when `AHL_JUDGE_BASE_URL` / `AHL_JUDGE_MODEL` / `AHL_JUDGE_API_KEY` are set; any OpenAI-compatible endpoint — Anthropic etc. via a compatible gateway; **pending** without a key — never a fabricated verdict); `human_annotation` (ingests an annotation file, else **pending**); `llm_rubric` (v1.1 — dimension-weighted LLM scoring: a rubric markdown table declares named dimensions + weights; per-dimension scores and weighted total stored in score records; same `AHL_JUDGE_*` config as `llm_judge`; no key → **pending**) | streaming / multi-model judging; per-provider protocols (no `AHL_JUDGE_PROVIDER`) |
 | Multi-turn simulators (v1.1) | Three types: `role_play` (an LLM plays the user from a four-section policy card; needs `AHL_SIM_*`; no key → `simulator_unconfigured` error, never a fabricated follow-up); `scripted` (deterministic playbook — zero LLM calls, zero keys); `script` (external program decides each user turn — fully custom logic). `single_turn` is still the default and is frozen. Auto Optimize supports `single_turn` only | — |
 | Multi-trial | `execution.trials: N` repeats the run N times (append-by-default evidence); `hlab run --trials N` per-run override; `hlab run --fresh` starts clean; `hlab eval --trial N` evaluates a historical trial; compare emits mean/stddev/win_rate across trials | — |
-| State policies | `isolated`, `reset` (executed) | `cumulative`, `snapshot_branch`, `replay` — declarable → WARN, not executed |
+| State policies | `isolated` (fresh process + disposable working-tree copy per case), `reset` (fresh process + shared filesystem per case) | `cumulative`, `snapshot_branch`, `replay` — declarable for compatibility but Auto review **ERROR**, never silently executed |
 | Reporting | `reports/report.md` + a real `reports/report.html` (stdlib renderer, no dependency); `compare` → `reports/compare.json`; `conclude` → `conclusion.md` | hosted dashboard; HTML charts |
 | Output | evidence tree (traces / raw / artifacts / scores / inspections / issues) | — |
 | Runtime source pinning (v1.1) | Experiments can pin runtimes to a source (`local_path` / `git_repo` / `harness_package`) with an optional patch, producing snapshot evidence (`evidence/snapshots/<runtime_id>.json` with source_dir_hash / commit_sha / patch_hash) that drives the `strong` evidence tier in compare reports; `hlab review` runs a read-only source health check (existence, reachability, fingerprint) and emits reconcilable fingerprints for comparison against the post-run snapshot | — |
@@ -144,6 +144,11 @@ hlab report <experiment>    build reports/report.md (+ report.html) from the evi
 hlab compare <experiment>   summarize the A/B result into reports/compare.json
 hlab conclude <experiment>  record your decision as conclusion.md (--winner, --reason)
 ```
+
+Auto execution currently supports `execution.mode: ab` only. The parser retains
+`sequential` / `longitudinal` / `replay` for Copilot and schema compatibility, but
+Auto review rejects them instead of dispatching with the wrong semantics. Use
+`hlab eval` / `hlab report` to work with already-collected evidence.
 
 `hlab <cmd>` and `python -m agent_harness_lab <cmd>` are equivalent.
 
