@@ -7,11 +7,6 @@ runtime、塑造其行为的那一层 —— 提示词、工具配置、记忆�
 让它在固定的一组 case 上对真实的 Agent Runtime 跑一遍，收集可复现的证据，看这次改动到底
 有没有用。
 
-> **状态：v1，正式版（`1.1.0`）。** 下面的内容如实说明当前实现了什么、还没实现什么。
-> 这份文档以准确为先，叙事和表达会在后续完善，但 README 不会声称超出代码已有的能力。
->
-> **Changelog：**[GitHub Releases](https://github.com/Kun-0546/agent-harness-lab/releases)
-> 即权威 changelog。仓库不设 `CHANGELOG.md` 文件 —— 变更说明随每个 release 发布。
 
 ## AHL 是什么
 
